@@ -28,7 +28,7 @@
     <label class="muted"><input type="checkbox" id="cam" checked> webcam adapt</label>
     <label class="muted">vol <input type="range" id="vol" min="0" max="60" step="1" value="22" style="width:64px;vertical-align:middle;"></label>
     <span class="muted" id="stat">phase-locked AV · idle</span>
-    <span class="muted" style="flex-basis:100%;line-height:1.4;margin-top:2px;">Click <b>📌 pin</b> to pop the light into a true always-on-top window (Chrome never throttles it — survives the game taking focus; no pin.app). Run Rivals <b>windowed</b>. Sound+light are one clock (phase-locked); webcam rPPG (HR/HRV→arousal) adapts coupling depth, quality-gated. No camera in this browser (Steam)? Run <code>python3 hr_bridge.py</code> on this machine — the page auto-falls back to it. Run <code>gameplay_read.py</code> too for input capture. Blind: set the wave, don't peek.</span>
+    <span class="muted" style="flex-basis:100%;line-height:1.4;margin-top:2px;">Click <b>📌 pin</b> to pop the light into a true always-on-top window (Chrome never throttles it — survives the game taking focus; no pin.app). Run Rivals <b>windowed</b>. Sound+light are one clock (phase-locked); webcam rPPG (HR/HRV→arousal) adapts coupling depth, quality-gated. One-click session: <code>FLICKER_PIN.command</code> starts the HR bridge, this window, and the <code>gameplay_read.py</code> input log — all reads epoch-stamped on one clock. No camera in this browser (Steam)? Run <code>python3 hr_bridge.py</code> — the page auto-falls back to it. Blind: set the wave, don't peek.</span>
   </div>
 </div>
 <script>
@@ -181,7 +181,7 @@ function start(){
     var useCam=$("cam").checked&&src&&quality>0.4;
     depth=useCam?(0.55+0.45*arousal):1.0;
     try{nodes.dep.gain.setTargetAtTime(nodes.baseDep*depth,ctx.currentTime,0.15);if(nodes.td)nodes.td.gain.setTargetAtTime(0.25*depth,ctx.currentTime,0.15);}catch(e){}
-    reads.push({t:+(performance.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,arousal:+arousal.toFixed(3),depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:useCam,src:src});
+    reads.push({t:+(performance.now()/1000).toFixed(2),epoch:+(Date.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,arousal:+arousal.toFixed(3),depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:useCam,src:src});
     $("stat").innerHTML=(performance.now()-lastFrame>1000?'<span class="bad">⚠ light throttled — click 📌 pin or use FLICKER_PIN.command</span> · ':'')+"depth <b>"+depth.toFixed(2)+"</b> · "+(useCam?('<span class="ok">adapting·'+src+'</span> · HR '+(hrEst?Math.round(hrEst):"—")+' · arousal '+(arousal*100).toFixed(0)+'%'):('<span class="bad">'+($("cam").checked?(src?"acquiring pulse…":"no pulse source — run hr_bridge.py"):"fixed")+'</span>'))+" · q "+(quality*100).toFixed(0)+"%";
   },250);
   // square 40 Hz light off the SAME audio clock -> phase-locked; θ-gated for tng; incoherent for sham
