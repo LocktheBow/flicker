@@ -27,7 +27,7 @@
     <label class="muted"><input type="checkbox" id="cam" checked> webcam adapt</label>
     <label class="muted">vol <input type="range" id="vol" min="0" max="60" step="1" value="22" style="width:64px;vertical-align:middle;"></label>
     <span class="muted" id="stat">phase-locked AV · idle</span>
-    <span class="muted" style="flex-basis:100%;line-height:1.4;margin-top:2px;">Pin this over your game (pin.app), run Rivals <b>windowed</b>. Sound+light are one clock (phase-locked); webcam rPPG (HR/HRV→arousal) adapts coupling depth, quality-gated. Run <code>gameplay_read.py</code> too for input capture. Blind: set the wave, don't peek.</span>
+    <span class="muted" style="flex-basis:100%;line-height:1.4;margin-top:2px;">Pin this over your game (pin.app), run Rivals <b>windowed</b>. Sound+light are one clock (phase-locked); webcam rPPG (HR/HRV→arousal) adapts coupling depth, quality-gated. No camera in this browser (Steam)? Run <code>python3 hr_bridge.py</code> on this machine — the page auto-falls back to it. Run <code>gameplay_read.py</code> too for input capture. Blind: set the wave, don't peek.</span>
   </div>
 </div>
 <script>
@@ -41,10 +41,31 @@ var stream=null,vid=$("v"),camOn=false;
 var W=64,H=48,proc=document.createElement("canvas");proc.width=W;proc.height=H;
 var pctx=proc.getContext("2d",{willReadFrequently:true});
 var buf=[],MAXS=12,hrEst=null,hrvEst=null,quality=0,arousal=0.5,baseHR=null,hrHist=[],camManual=false,coverage=0;
+
+/* ---------- localhost bridge fallback (browsers without a camera API, e.g. Steam overlay):
+             hr_bridge.py does the identical POS read on this machine and serves derived
+             numbers at 127.0.0.1 — localhost is a trustworthy origin, so the HTTPS page
+             may fetch it. Camera stays primary; bridge only feeds when camOn is false. */
+var bridgeOn=false,bridgeTimer=null,bridgeFails=0,lastSrc=null,BRIDGE="http://127.0.0.1:8787/hr";
+function startBridge(){
+  if(bridgeTimer)return;
+  bridgeTimer=setInterval(function(){
+    if(camOn)return;
+    fetch(BRIDGE,{cache:"no-store"}).then(function(r){return r.json();}).then(function(j){
+      bridgeOn=true;bridgeFails=0;
+      if(j.hr!=null)hrEst=j.hr;if(j.hrv!=null)hrvEst=j.hrv;
+      quality=clamp(+j.quality||0,0,1);arousal=clamp(j.arousal!=null?+j.arousal:0.5,0,1);
+    }).catch(function(){if(++bridgeFails>=4){bridgeOn=false;if(!camOn)quality=0;}});
+  },500);
+}
+function stopBridge(){if(bridgeTimer){clearInterval(bridgeTimer);bridgeTimer=null;}bridgeOn=false;bridgeFails=0;}
 function startCam(){
-  if(!navigator.mediaDevices)return;
+  if(/nocam/.test(location.search)||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){startBridge();return;}
+  var settled=false;
+  setTimeout(function(){if(!settled&&!camOn)startBridge();},4000); // permission prompt hung or never shown -> bridge
   var want={video:{width:{ideal:640},height:{ideal:480},frameRate:{ideal:30,max:30},facingMode:"user"},audio:false};
   navigator.mediaDevices.getUserMedia(want).then(function(s){
+    settled=true;stopBridge();
     stream=s;vid.srcObject=s;vid.play();camOn=true;
     // best-effort: LOCK auto-exposure / auto-white-balance / auto-focus — their slow drift
     // is the #1 rPPG artifact (the sensor "hunts" and injects in-band luminance noise).
@@ -55,7 +76,7 @@ function startCam(){
       if(adv.length)tr.applyConstraints({advanced:adv}).then(function(){camManual=true;}).catch(function(){});
     }catch(e){}
     requestAnimationFrame(sample);
-  }).catch(function(e){camOn=false;$("cam").checked=false;});
+  }).catch(function(e){settled=true;camOn=false;startBridge();});
 }
 function stopCam(){camOn=false;if(stream)stream.getTracks().forEach(function(t){t.stop();});stream=null;buf=[];}
 var lastSample=0,lastAnalyze=0;
@@ -132,11 +153,12 @@ function start(){
   if(adapt)startCam();
   // control loop: quality-gated arousal -> coupling depth (never adapts on garbage)
   ctrl=setInterval(function(){
-    var useCam=$("cam").checked&&camOn&&quality>0.4;
+    var src=camOn?"cam":(bridgeOn?"bridge":null);if(src)lastSrc=src;
+    var useCam=$("cam").checked&&src&&quality>0.4;
     depth=useCam?(0.55+0.45*arousal):1.0;
     try{nodes.dep.gain.setTargetAtTime(nodes.baseDep*depth,ctx.currentTime,0.15);if(nodes.td)nodes.td.gain.setTargetAtTime(0.25*depth,ctx.currentTime,0.15);}catch(e){}
-    reads.push({t:+(performance.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,arousal:+arousal.toFixed(3),depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:useCam});
-    $("stat").innerHTML="depth <b>"+depth.toFixed(2)+"</b> · "+(useCam?('<span class="ok">adapting</span> · HR '+(hrEst?Math.round(hrEst):"—")+' · arousal '+(arousal*100).toFixed(0)+'%'):('<span class="bad">'+($("cam").checked?"acquiring pulse…":"fixed")+'</span>'))+" · q "+(quality*100).toFixed(0)+"%";
+    reads.push({t:+(performance.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,arousal:+arousal.toFixed(3),depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:useCam,src:src});
+    $("stat").innerHTML="depth <b>"+depth.toFixed(2)+"</b> · "+(useCam?('<span class="ok">adapting·'+src+'</span> · HR '+(hrEst?Math.round(hrEst):"—")+' · arousal '+(arousal*100).toFixed(0)+'%'):('<span class="bad">'+($("cam").checked?(src?"acquiring pulse…":"no pulse source — run hr_bridge.py"):"fixed")+'</span>'))+" · q "+(quality*100).toFixed(0)+"%";
   },250);
   // square 40 Hz light off the SAME audio clock -> phase-locked; θ-gated for tng; incoherent for sham
   var jt=0,jf=20,fc=0,ft=performance.now();
@@ -150,14 +172,14 @@ function start(){
 function stop(){
   if(!running)return;running=false;if(ctrl){clearInterval(ctrl);ctrl=null;}
   if(nodes){if(nodes.shamJ)clearInterval(nodes.shamJ);nodes.master.gain.linearRampToValueAtTime(0,ctx.currentTime+0.3);(function(c,n){setTimeout(function(){try{n.src.stop();n.lfo.stop();if(n.tlfo)n.tlfo.stop();c.close();}catch(e){}},400);})(ctx,nodes);nodes=null;}
-  if(raf){cancelAnimationFrame(raf);raf=null;}flick.style.background="#000";stopCam();
+  if(raf){cancelAnimationFrame(raf);raf=null;}flick.style.background="#000";stopCam();stopBridge();
   var b=$("go");b.textContent="▶ start";b.classList.remove("stop");
   if(reads.length)saveRead();reads=[];hrEst=hrvEst=baseHR=null;hrHist=[];
 }
 function saveRead(){
   var ar=reads.map(function(r){return r.arousal;}),dp=reads.map(function(r){return r.depth;});
   var rec={schema:"g-lab/1",type:"bci_read",id:"flk_"+Date.now(),ts:startedISO||new Date().toISOString(),phase:"intervention",
-    read:"rppg_camera",modality:"audiovisual",privacy:"derived_numbers_only_no_video_no_network",
+    read:lastSrc==="cam"?"rppg_camera":(lastSrc==="bridge"?"rppg_local_bridge":"none"),modality:"audiovisual",privacy:"derived_numbers_only_no_video_localhost_only",
     summary:{samples:reads.length,mean_hr:hrEst?Math.round(hrEst):null,mean_arousal:ar.length?+(ar.reduce(function(a,b){return a+b;},0)/ar.length).toFixed(3):null,mean_depth:dp.length?+(dp.reduce(function(a,b){return a+b;},0)/dp.length).toFixed(3):null,baseline_hr:baseHR?Math.round(baseHR):null},
     timeseries:reads};
   var blob=new Blob([JSON.stringify(rec,null,2)],{type:"application/json"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="bci_read_"+rec.ts.replace(/[:.]/g,"-")+".json";a.click();
