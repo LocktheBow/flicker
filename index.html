@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>g-lab · pin-me flicker (tight in-game BCI)</title>
+<style>
+  :root{color-scheme:dark;}*{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:#e6e6e6;overflow:hidden;}
+  #panel{position:fixed;inset:0;display:flex;flex-direction:column;}
+  #flick{flex:1;background:#000;}                 /* the 40 Hz light surface — pin THIS over the game */
+  #bar{padding:7px 9px;background:#0d1117;border-top:1px solid #21262d;font-size:11px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  button{font-size:12px;font-weight:600;border:none;border-radius:7px;padding:7px 11px;cursor:pointer;color:#fff;}
+  #go{background:#2ea043;} #go.stop{background:#da3633;}
+  select,input[type=range]{background:#0d1117;color:#e6e6e6;border:1px solid #30363d;border-radius:6px;font-size:11px;}
+  .muted{color:#8b949e;} .val{color:#58a6ff;font-weight:600;} .ok{color:#3fb950;} .bad{color:#f0c674;}
+  video{position:absolute;width:2px;height:2px;opacity:0;pointer-events:none;top:0;left:0;}   /* hidden feed, kept alive */
+</style>
+</head>
+<body>
+<div id="panel">
+  <div id="flick"></div>
+  <video id="v" playsinline muted></video>
+  <div id="bar">
+    <button id="go">▶ start</button>
+    <label class="muted">wave <select id="wave"><option value="tng" selected>θ-nested γ</option><option value="gamma40">40 Hz γ</option><option value="sham">sham</option></select></label>
+    <label class="muted"><input type="checkbox" id="cam" checked> webcam adapt</label>
+    <label class="muted">vol <input type="range" id="vol" min="0" max="60" step="1" value="22" style="width:64px;vertical-align:middle;"></label>
+    <span class="muted" id="stat">phase-locked AV · idle</span>
+    <span class="muted" style="flex-basis:100%;line-height:1.4;margin-top:2px;">Pin this over your game (pin.app), run Rivals <b>windowed</b>. Sound+light are one clock (phase-locked); webcam rPPG (HR/HRV→arousal) adapts coupling depth, quality-gated. Run <code>gameplay_read.py</code> too for input capture. Blind: set the wave, don't peek.</span>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var $=function(id){return document.getElementById(id);};
+var flick=$("flick");
+
+/* ---------- webcam rPPG read (autonomic arousal) ---------- */
+var stream=null,vid=$("v"),camOn=false;
+var W=64,H=48,proc=document.createElement("canvas");proc.width=W;proc.height=H;
+var pctx=proc.getContext("2d",{willReadFrequently:true});
+var buf=[],MAXS=12,hrEst=null,hrvEst=null,quality=0,arousal=0.5,baseHR=null,hrHist=[],camManual=false,coverage=0;
+function startCam(){
+  if(!navigator.mediaDevices)return;
+  var want={video:{width:{ideal:640},height:{ideal:480},frameRate:{ideal:30,max:30},facingMode:"user"},audio:false};
+  navigator.mediaDevices.getUserMedia(want).then(function(s){
+    stream=s;vid.srcObject=s;vid.play();camOn=true;
+    // best-effort: LOCK auto-exposure / auto-white-balance / auto-focus — their slow drift
+    // is the #1 rPPG artifact (the sensor "hunts" and injects in-band luminance noise).
+    try{var tr=s.getVideoTracks()[0],caps=(tr.getCapabilities&&tr.getCapabilities())||{},adv=[];
+      if(caps.exposureMode&&caps.exposureMode.indexOf("manual")>=0)adv.push({exposureMode:"manual"});
+      if(caps.whiteBalanceMode&&caps.whiteBalanceMode.indexOf("manual")>=0)adv.push({whiteBalanceMode:"manual"});
+      if(caps.focusMode&&caps.focusMode.indexOf("manual")>=0)adv.push({focusMode:"manual"});
+      if(adv.length)tr.applyConstraints({advanced:adv}).then(function(){camManual=true;}).catch(function(){});
+    }catch(e){}
+    requestAnimationFrame(sample);
+  }).catch(function(e){camOn=false;$("cam").checked=false;});
+}
+function stopCam(){camOn=false;if(stream)stream.getTracks().forEach(function(t){t.stop();});stream=null;buf=[];}
+var lastSample=0,lastAnalyze=0;
+function sample(ts){
+  if(!camOn)return;
+  var t=ts/1000;
+  // throttle the EXPENSIVE work off the game's critical path:
+  //   getImageData at ~30 Hz (plenty for HR); autocorrelation at ~2 Hz.
+  //   Only the flicker loop runs at full display rate.
+  if(t-lastSample>=0.033){ lastSample=t;
+    try{var vW=vid.videoWidth||640,vH=vid.videoHeight||480;
+      pctx.drawImage(vid,vW*0.30,vH*0.22,vW*0.40,vH*0.28,0,0,W,H);
+      var d=pctx.getImageData(0,0,W,H).data,rs=0,gs=0,bs=0,cnt=0,tot=W*H,r,g,b;
+      for(var i=0;i<d.length;i+=4){r=d[i];g=d[i+1];b=d[i+2];
+        // skin mask: reddish, mid-bright, not clipped -> excludes background/hair/shadow/glare
+        if(r>60&&r<250&&r>g&&g>=b&&(r-b)>12){rs+=r;gs+=g;bs+=b;cnt++;}}
+      coverage=cnt/tot;
+      if(cnt<tot*0.12){for(i=0,rs=gs=bs=0;i<d.length;i+=4){rs+=d[i];gs+=d[i+1];bs+=d[i+2];}cnt=tot;} // fallback: whole ROI
+      buf.push({t:t,r:rs/cnt,g:gs/cnt,b:bs/cnt});while(buf.length&&t-buf[0].t>MAXS)buf.shift();
+      if(buf.length>60&&t-lastAnalyze>=0.5){lastAnalyze=t;analyze();}
+    }catch(e){}
+  }
+  requestAnimationFrame(sample);
+}
+function median(a){var s=a.slice().sort(function(x,y){return x-y;}),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;}
+function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+function mean(a){var m=0,i;for(i=0;i<a.length;i++)m+=a[i];return m/(a.length||1);}
+function std(a){var m=mean(a),v=0,i;for(i=0;i<a.length;i++)v+=(a[i]-m)*(a[i]-m);return Math.sqrt(v/(a.length||1));}
+function analyze(){
+  var n=buf.length,dur=buf[n-1].t-buf[0].t;if(dur<3)return;var fps=n/dur,i;
+  // --- POS (Wang 2017): temporally-normalize RGB, project orthogonal to skin tone, combine.
+  //     Cancels the shared luminance/motion drift green-only can't -> far cleaner pulse. ---
+  var R=buf.map(function(x){return x.r;}),G=buf.map(function(x){return x.g;}),B=buf.map(function(x){return x.b;});
+  var mR=mean(R),mG=mean(G),mB=mean(B);if(mR<1||mG<1||mB<1){quality=0;return;}
+  var S1=new Array(n),S2=new Array(n);
+  for(i=0;i<n;i++){var Rn=R[i]/mR-1,Gn=G[i]/mG-1,Bn=B[i]/mB-1;S1[i]=Gn-Bn;S2[i]=Gn+Bn-2*Rn;}
+  var al=std(S1)/(std(S2)||1e-6),p=new Array(n);for(i=0;i<n;i++)p[i]=S1[i]+al*S2[i];
+  // detrend (~1s moving-avg high-pass, keeps low HR) + 3-tap low-pass (kills alias/high-freq) + normalize
+  var win=Math.max(3,Math.round(fps*1.0)),s=new Array(n);
+  for(i=0;i<n;i++){var a=Math.max(0,i-win),b=Math.min(n-1,i+win),m=0,c=0;for(var j=a;j<=b;j++){m+=p[j];c++;}s[i]=p[i]-m/c;}
+  var sm=new Array(n);for(i=0;i<n;i++){sm[i]=((i>0?s[i-1]:s[i])+2*s[i]+(i<n-1?s[i+1]:s[i]))/4;}s=sm;
+  var sd=std(s)||1e-6;for(i=0;i<n;i++)s[i]/=sd;
+  var minLag=Math.floor(fps*60/240),maxLag=Math.ceil(fps*60/42),bestLag=-1,best=-2,acs=[];
+  for(var lag=minLag;lag<=maxLag&&lag<n;lag++){var r=0;for(i=0;i+lag<n;i++)r+=s[i]*s[i+lag];r/=(n-lag);acs.push(r);if(r>best){best=r;bestLag=lag;}}
+  // quality = peak prominence (SNR-like) × face-coverage: adapts only on a genuine, well-captured pulse
+  var acAbs=acs.reduce(function(x,y){return x+Math.abs(y);},0)/(acs.length||1);
+  quality=clamp((best-acAbs)/(Math.abs(best)+1e-6),0,1)*clamp(coverage*2.5,0.4,1);
+  if(bestLag>0&&quality>0.3){
+    var hr=60/(bestLag/fps);hrEst=hrEst==null?hr:0.8*hrEst+0.2*hr;hrHist.push(hrEst);if(hrHist.length>240)hrHist.shift();
+    var minD=Math.max(2,Math.round(bestLag*0.6)),pk=[];
+    for(i=1;i<n-1;i++){if(s[i]>0.5&&s[i]>=s[i-1]&&s[i]>s[i+1]){if(!pk.length||i-pk[pk.length-1]>=minD)pk.push(i);}}
+    if(pk.length>3){var ibi=[];for(i=1;i<pk.length;i++)ibi.push((buf[pk[i]].t-buf[pk[i-1]].t)*1000);var df=[];for(i=1;i<ibi.length;i++)df.push(ibi[i]-ibi[i-1]);if(df.length){var ms=0;for(i=0;i<df.length;i++)ms+=df[i]*df[i];hrvEst=Math.sqrt(ms/df.length);}}
+    if(baseHR==null&&hrHist.length>=Math.round(fps*20))baseHR=median(hrHist);
+    var hrT=baseHR?clamp((hrEst-baseHR)/12+0.5,0,1):0.5,hrvT=hrvEst!=null?clamp(1-hrvEst/80,0,1):0.5;
+    arousal=clamp(0.6*hrT+0.4*hrvT,0,1);
+  }
+}
+
+/* ---------- phase-locked AV write, adaptive coupling ---------- */
+var ctx=null,nodes=null,raf=null,ctrl=null,running=false,depth=1.0,startedISO=null,reads=[];
+function noiseBuf(c){var len=c.sampleRate*2,b=c.createBuffer(1,len,c.sampleRate),d=b.getChannelData(0),last=0;for(var i=0;i<len;i++){var w=Math.random()*2-1;last=(last+0.02*w)/1.02;d[i]=last*3.5;}return b;}
+$("vol").oninput=function(){if(nodes)nodes.master.gain.setTargetAtTime(this.value/100,ctx.currentTime,0.05);};
+function start(){
+  var wave=$("wave").value,vol=+$("vol").value/100,adapt=$("cam").checked;
+  ctx=new(window.AudioContext||window.webkitAudioContext)();if(ctx.resume)ctx.resume();
+  var src=ctx.createBufferSource();src.buffer=noiseBuf(ctx);src.loop=true;
+  var modGain=ctx.createGain();modGain.gain.value=0.5;var lfo=ctx.createOscillator();lfo.type="sine";var dep=ctx.createGain();
+  var master=ctx.createGain();master.gain.value=0;src.connect(modGain);modGain.connect(master);master.connect(ctx.destination);
+  var tlfo=null,td=null,shamJ=null,baseDep;
+  if(wave==="sham"){lfo.frequency.value=20;baseDep=0.18;dep.gain.value=baseDep;lfo.connect(dep);dep.connect(modGain.gain);shamJ=setInterval(function(){if(ctx)try{lfo.frequency.setValueAtTime(5+Math.random()*40,ctx.currentTime);}catch(e){}},700);}
+  else{lfo.frequency.value=40;baseDep=(wave==="tng")?0.25:0.5;dep.gain.value=baseDep;lfo.connect(dep);dep.connect(modGain.gain);if(wave==="tng"){tlfo=ctx.createOscillator();tlfo.type="sine";tlfo.frequency.value=6;td=ctx.createGain();td.gain.value=0.25;tlfo.connect(td);td.connect(dep.gain);}}
+  src.start();lfo.start();if(tlfo)tlfo.start();master.gain.linearRampToValueAtTime(vol,ctx.currentTime+2);
+  nodes={src:src,lfo:lfo,dep:dep,td:td,master:master,shamJ:shamJ,wave:wave,baseDep:baseDep};
+  if(adapt)startCam();
+  // control loop: quality-gated arousal -> coupling depth (never adapts on garbage)
+  ctrl=setInterval(function(){
+    var useCam=$("cam").checked&&camOn&&quality>0.4;
+    depth=useCam?(0.55+0.45*arousal):1.0;
+    try{nodes.dep.gain.setTargetAtTime(nodes.baseDep*depth,ctx.currentTime,0.15);if(nodes.td)nodes.td.gain.setTargetAtTime(0.25*depth,ctx.currentTime,0.15);}catch(e){}
+    reads.push({t:+(performance.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,arousal:+arousal.toFixed(3),depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:useCam});
+    $("stat").innerHTML="depth <b>"+depth.toFixed(2)+"</b> · "+(useCam?('<span class="ok">adapting</span> · HR '+(hrEst?Math.round(hrEst):"—")+' · arousal '+(arousal*100).toFixed(0)+'%'):('<span class="bad">'+($("cam").checked?"acquiring pulse…":"fixed")+'</span>'))+" · q "+(quality*100).toFixed(0)+"%";
+  },250);
+  // square 40 Hz light off the SAME audio clock -> phase-locked; θ-gated for tng; incoherent for sham
+  var jt=0,jf=20,fc=0,ft=performance.now();
+  (function loop(){var t=ctx.currentTime,on;
+    if(wave==="sham"){if(t-jt>0.7){jt=t;jf=5+Math.random()*40;}on=(Math.sin(2*Math.PI*jf*t)>=0)?1:0;}
+    else{var g=(Math.sin(2*Math.PI*40*t)>=0)?1:0;var d=(wave==="tng")?((0.5+0.5*Math.sin(2*Math.PI*6*t))>0.5?1:0):1;on=g&&d;}
+    flick.style.background=on?"#fff":"#000";fc++;raf=requestAnimationFrame(loop);})();
+  setTimeout(function(){var hz=fc/((performance.now()-ft)/1000);flick.title=Math.round(hz)+" Hz "+(hz>=88?"OK":"need ~120Hz");},900);
+  running=true;startedISO=new Date().toISOString();var b=$("go");b.textContent="■ stop";b.classList.add("stop");
+}
+function stop(){
+  if(!running)return;running=false;if(ctrl){clearInterval(ctrl);ctrl=null;}
+  if(nodes){if(nodes.shamJ)clearInterval(nodes.shamJ);nodes.master.gain.linearRampToValueAtTime(0,ctx.currentTime+0.3);(function(c,n){setTimeout(function(){try{n.src.stop();n.lfo.stop();if(n.tlfo)n.tlfo.stop();c.close();}catch(e){}},400);})(ctx,nodes);nodes=null;}
+  if(raf){cancelAnimationFrame(raf);raf=null;}flick.style.background="#000";stopCam();
+  var b=$("go");b.textContent="▶ start";b.classList.remove("stop");
+  if(reads.length)saveRead();reads=[];hrEst=hrvEst=baseHR=null;hrHist=[];
+}
+function saveRead(){
+  var ar=reads.map(function(r){return r.arousal;}),dp=reads.map(function(r){return r.depth;});
+  var rec={schema:"g-lab/1",type:"bci_read",id:"flk_"+Date.now(),ts:startedISO||new Date().toISOString(),phase:"intervention",
+    read:"rppg_camera",modality:"audiovisual",privacy:"derived_numbers_only_no_video_no_network",
+    summary:{samples:reads.length,mean_hr:hrEst?Math.round(hrEst):null,mean_arousal:ar.length?+(ar.reduce(function(a,b){return a+b;},0)/ar.length).toFixed(3):null,mean_depth:dp.length?+(dp.reduce(function(a,b){return a+b;},0)/dp.length).toFixed(3):null,baseline_hr:baseHR?Math.round(baseHR):null},
+    timeseries:reads};
+  var blob=new Blob([JSON.stringify(rec,null,2)],{type:"application/json"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="bci_read_"+rec.ts.replace(/[:.]/g,"-")+".json";a.click();
+}
+$("go").onclick=function(){running?stop():start();};
+})();
+</script>
+</body>
+</html>
