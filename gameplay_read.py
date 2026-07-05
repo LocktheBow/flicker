@@ -15,14 +15,15 @@ Mouse movement is aggregated into path length/speed/correction-count
 on the fly -- the raw (x,y) trace itself is never written to disk, only the
 aggregate numbers. Output is a single local JSON file. No network, ever.
 
-INPUT LAG: pynput's listener callback runs synchronously in the OS event-
-delivery path, so heavy per-event work (raw mouse-move handling especially,
-which can fire hundreds of times/sec while aiming) can measurably delay
-input -- noticeable on cloud-streamed games (GeForce NOW etc.) where the
-latency budget is already tight. Mouse-move processing is throttled to
-~66 Hz (MOVE_THROTTLE_S) so the expensive math only runs at that rate; raw
-events still pass through pynput, but the callback does near-nothing for
-the ones it skips.
+INPUT LAG (design): the only high-rate input stream is mouse movement -- a
+gaming mouse emits move events at up to 1000 Hz, and hooking them puts Python
+in the OS event-delivery chain once per event. So this script does NOT hook
+mouse-move at all: it POLLS the cursor position at ~66 Hz from its own thread
+(pynput.mouse.Controller().position -- a read, not a tap), which yields the
+same path/speed/correction data with zero per-event work. Only low-rate events
+(key presses, clicks, <~20 Hz) are hooked, and those callbacks are bare
+timestamp appends. The whole process also drops to low CPU priority (nice +10)
+so it never competes with the game for a core.
 
 HONEST SCIENCE: keystroke dynamics are a STATE / engagement / motor-tempo read,
 NOT a measure of fluid intelligence. Their best use here is (a) a covariate and
@@ -218,13 +219,32 @@ def main():
         mv["last_x"], mv["last_y"] = x, y
         return True
 
-    def on_move(x, y):
-        process_move(mv, x, y, time.perf_counter() - t0)
+    # mouse path via 66 Hz position POLLING (a read, not an event tap) -- keeps
+    # Python entirely out of the mouse-move delivery path. See INPUT LAG above.
+    POLL_HZ = 66.0
+    poll_stop = threading.Event()
+
+    def poll_moves():
+        mc = mouse.Controller()
+        period = 1.0 / POLL_HZ
+        while not poll_stop.is_set():
+            try:
+                x, y = mc.position
+                process_move(mv, x, y, time.perf_counter() - t0, throttle_s=0.0)
+            except Exception:
+                pass
+            time.sleep(period)
+
+    try:
+        os.nice(10)  # low priority: the game always wins the CPU
+    except (AttributeError, OSError):
+        pass
 
     kl = keyboard.Listener(on_press=on_press)
-    ml = mouse.Listener(on_click=on_click, on_move=on_move)
+    ml = mouse.Listener(on_click=on_click)   # clicks only -- no move hook
     kl.start()
     ml.start()
+    threading.Thread(target=poll_moves, daemon=True).start()
 
     started = datetime.now(timezone.utc).isoformat()
     dur = args.minutes * 60.0
@@ -248,6 +268,7 @@ def main():
     if not args.no_serve:
         try:
             srv = ThreadingHTTPServer(("127.0.0.1", args.aim_port), AimHandler)
+            srv.daemon_threads = True
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             print(f"[g-lab] aim arousal live at http://127.0.0.1:{args.aim_port}/aim")
         except OSError as e:
@@ -293,6 +314,7 @@ def main():
     except KeyboardInterrupt:
         print("\n[g-lab] stopped early.")
     finally:
+        poll_stop.set()
         kl.stop()
         ml.stop()
         tail = time.perf_counter() - t0
