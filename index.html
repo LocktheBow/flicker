@@ -26,9 +26,10 @@
     <button id="pin" title="pop the light into a true always-on-top window — Chrome never throttles it">📌 pin</button>
     <label class="muted">wave <select id="wave"><option value="tng" selected>θ-nested γ</option><option value="gamma40">40 Hz γ</option><option value="sham">sham</option></select></label>
     <label class="muted"><input type="checkbox" id="cam" checked> webcam adapt</label>
+    <label class="muted"><input type="checkbox" id="aim" checked> aim adapt</label>
     <label class="muted">vol <input type="range" id="vol" min="0" max="60" step="1" value="22" style="width:64px;vertical-align:middle;"></label>
     <span class="muted" id="stat">phase-locked AV · idle</span>
-    <span class="muted" style="flex-basis:100%;line-height:1.4;margin-top:2px;">Click <b>📌 pin</b> to pop the light into a true always-on-top window (Chrome never throttles it — survives the game taking focus; no pin.app). Run Rivals <b>windowed</b>. Sound+light are one clock (phase-locked); webcam rPPG (HR/HRV→arousal) adapts coupling depth, quality-gated. One-click session: <code>FLICKER_PIN.command</code> starts the HR bridge, this window, and the <code>gameplay_read.py</code> input log — all reads epoch-stamped on one clock. No camera in this browser (Steam)? Run <code>python3 hr_bridge.py</code> — the page auto-falls back to it. Blind: set the wave, don't peek.</span>
+    <span class="muted" style="flex-basis:100%;line-height:1.4;margin-top:2px;">Click <b>📌 pin</b> to pop the light into a true always-on-top window (Chrome never throttles it — survives the game taking focus; no pin.app). Run Rivals <b>windowed</b>. Sound+light are one clock (phase-locked); webcam rPPG (HR/HRV→arousal) adapts coupling depth, quality-gated. Two adaptive inputs: <b>webcam</b> rPPG (HR/HRV→arousal, quality-gated) and <b>aim</b> tempo (mouse/action rate vs your baseline, from <code>gameplay_read.py</code>) — blended to set coupling depth. One-click session: <code>FLICKER_PIN.command</code> opens this window + the input log, all reads epoch-stamped on one clock. Local desktop reads the camera directly; only the Steam browser needs <code>python3 hr_bridge.py</code>. Blind: set the wave, don't peek.</span>
   </div>
 </div>
 <script>
@@ -83,6 +84,23 @@ function startBridge(){
   },500);
 }
 function stopBridge(){if(bridgeTimer){clearInterval(bridgeTimer);bridgeTimer=null;}bridgeOn=false;bridgeFails=0;}
+
+/* ---------- aim-adaptive read: gameplay_read.py serves a rolling motor-tempo
+             arousal (mouse/aim/action rate vs your own baseline) on localhost.
+             Blended with the HR arousal to drive coupling depth. */
+var aimOn=false,aimArousal=0.5,aimQual=0,aimApm=null,aimTimer=null,aimFails=0,AIMURL="http://127.0.0.1:8788/aim";
+function startAim(){
+  if(aimTimer)return;
+  aimTimer=setInterval(function(){
+    fetch(AIMURL,{cache:"no-store"}).then(function(r){return r.json();}).then(function(j){
+      aimOn=true;aimFails=0;
+      aimArousal=clamp(j.arousal!=null?+j.arousal:0.5,0,1);
+      aimQual=clamp(+j.quality||0,0,1);
+      aimApm=j.apm!=null?+j.apm:null;
+    }).catch(function(){if(++aimFails>=4){aimOn=false;aimQual=0;}});
+  },500);
+}
+function stopAim(){if(aimTimer){clearInterval(aimTimer);aimTimer=null;}aimOn=false;aimFails=0;aimQual=0;}
 function startCam(){
   if(/nocam/.test(location.search)||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){startBridge();return;}
   var settled=false;
@@ -175,14 +193,24 @@ function start(){
   src.start();lfo.start();if(tlfo)tlfo.start();master.gain.linearRampToValueAtTime(vol,ctx.currentTime+2);
   nodes={src:src,lfo:lfo,dep:dep,td:td,master:master,shamJ:shamJ,wave:wave,baseDep:baseDep};
   if(adapt)startCam();
-  // control loop: quality-gated arousal -> coupling depth (never adapts on garbage)
+  if($("aim").checked)startAim();
+  // control loop: quality-gated arousal -> coupling depth (never adapts on garbage).
+  // Two independent sources: HR (autonomic) + aim tempo (motor). Blend what's live.
   ctrl=setInterval(function(){
-    var src=camOn?"cam":(bridgeOn?"bridge":null);if(src)lastSrc=src;
-    var useCam=$("cam").checked&&src&&quality>0.4;
-    depth=useCam?(0.55+0.45*arousal):1.0;
+    var hrSrc=camOn?"cam":(bridgeOn?"bridge":null);if(hrSrc)lastSrc=hrSrc;
+    var camOK=$("cam").checked&&hrSrc&&quality>0.4;
+    var aimOK=$("aim").checked&&aimOn&&aimQual>0.3;
+    var comb,adaptSrc;
+    if(camOK&&aimOK){comb=0.6*arousal+0.4*aimArousal;adaptSrc="cam+aim";}   // HR weighted higher
+    else if(camOK){comb=arousal;adaptSrc="cam";}
+    else if(aimOK){comb=aimArousal;adaptSrc="aim";}
+    else{comb=null;adaptSrc=null;}
+    var adapting=comb!=null;
+    depth=adapting?(0.55+0.45*comb):1.0;
     try{nodes.dep.gain.setTargetAtTime(nodes.baseDep*depth,ctx.currentTime,0.15);if(nodes.td)nodes.td.gain.setTargetAtTime(0.25*depth,ctx.currentTime,0.15);}catch(e){}
-    reads.push({t:+(performance.now()/1000).toFixed(2),epoch:+(Date.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,arousal:+arousal.toFixed(3),depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:useCam,src:src});
-    $("stat").innerHTML=(performance.now()-lastFrame>1000?'<span class="bad">⚠ light throttled — click 📌 pin or use FLICKER_PIN.command</span> · ':'')+"depth <b>"+depth.toFixed(2)+"</b> · "+(useCam?('<span class="ok">adapting·'+src+'</span> · HR '+(hrEst?Math.round(hrEst):"—")+' · arousal '+(arousal*100).toFixed(0)+'%'):('<span class="bad">'+($("cam").checked?(src?"acquiring pulse…":"no pulse source — run hr_bridge.py"):"fixed")+'</span>'))+" · q "+(quality*100).toFixed(0)+"%";
+    reads.push({t:+(performance.now()/1000).toFixed(2),epoch:+(Date.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,arousal:+arousal.toFixed(3),aim_arousal:+aimArousal.toFixed(3),aim_apm:aimApm!=null?Math.round(aimApm):null,combined:comb!=null?+comb.toFixed(3):null,depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:adapting,src:adaptSrc});
+    var warn=(performance.now()-lastFrame>1000?'<span class="bad">⚠ light throttled — click 📌 pin</span> · ':'');
+    $("stat").innerHTML=warn+"depth <b>"+depth.toFixed(2)+"</b> · "+(adapting?('<span class="ok">adapting·'+adaptSrc+'</span>'+(camOK?' · HR '+(hrEst?Math.round(hrEst):"—"):'')+(aimOK?' · APM '+(aimApm!=null?Math.round(aimApm):"—"):'')+' · arousal '+(comb*100).toFixed(0)+'%'):('<span class="bad">'+(($("cam").checked||$("aim").checked)?"acquiring…":"fixed")+'</span>'))+" · q "+(quality*100).toFixed(0)+"%"+($("aim").checked?" · aimq "+(aimQual*100).toFixed(0)+"%":"");
   },250);
   // square 40 Hz light off the SAME audio clock -> phase-locked; θ-gated for tng; incoherent for sham
   var jt=0,jf=20,fc=0,ft=performance.now();lastFrame=performance.now();
@@ -196,15 +224,17 @@ function start(){
 function stop(){
   if(!running)return;running=false;if(ctrl){clearInterval(ctrl);ctrl=null;}
   if(nodes){if(nodes.shamJ)clearInterval(nodes.shamJ);nodes.master.gain.linearRampToValueAtTime(0,ctx.currentTime+0.3);(function(c,n){setTimeout(function(){try{n.src.stop();n.lfo.stop();if(n.tlfo)n.tlfo.stop();c.close();}catch(e){}},400);})(ctx,nodes);nodes=null;}
-  if(raf){CAF(raf);raf=null;}flick.style.background="#000";stopCam();stopBridge();
+  if(raf){CAF(raf);raf=null;}flick.style.background="#000";stopCam();stopBridge();stopAim();
   var b=$("go");b.textContent="▶ start";b.classList.remove("stop");
   if(reads.length)saveRead();reads=[];hrEst=hrvEst=baseHR=null;hrHist=[];
 }
 function saveRead(){
   var ar=reads.map(function(r){return r.arousal;}),dp=reads.map(function(r){return r.depth;});
+  var avg=function(a){return a.length?+(a.reduce(function(x,y){return x+y;},0)/a.length).toFixed(3):null;};
+  var aimRows=reads.filter(function(r){return r.aim_apm!=null;});
   var rec={schema:"g-lab/1",type:"bci_read",id:"flk_"+Date.now(),ts:startedISO||new Date().toISOString(),phase:"intervention",
-    read:lastSrc==="cam"?"rppg_camera":(lastSrc==="bridge"?"rppg_local_bridge":"none"),modality:"audiovisual",privacy:"derived_numbers_only_no_video_localhost_only",
-    summary:{samples:reads.length,mean_hr:hrEst?Math.round(hrEst):null,mean_arousal:ar.length?+(ar.reduce(function(a,b){return a+b;},0)/ar.length).toFixed(3):null,mean_depth:dp.length?+(dp.reduce(function(a,b){return a+b;},0)/dp.length).toFixed(3):null,baseline_hr:baseHR?Math.round(baseHR):null},
+    read:lastSrc==="cam"?"rppg_camera":(lastSrc==="bridge"?"rppg_local_bridge":"none"),modality:"audiovisual",inputs:["rppg_hr","aim_tempo"],privacy:"derived_numbers_only_no_video_localhost_only",
+    summary:{samples:reads.length,mean_hr:hrEst?Math.round(hrEst):null,mean_arousal:avg(ar),mean_aim_arousal:avg(reads.map(function(r){return r.aim_arousal;})),mean_apm:aimRows.length?Math.round(aimRows.reduce(function(a,r){return a+r.aim_apm;},0)/aimRows.length):null,mean_depth:avg(dp),baseline_hr:baseHR?Math.round(baseHR):null},
     timeseries:reads};
   var blob=new Blob([JSON.stringify(rec,null,2)],{type:"application/json"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="bci_read_"+rec.ts.replace(/[:.]/g,"-")+".json";a.click();
 }
