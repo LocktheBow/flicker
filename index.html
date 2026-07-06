@@ -66,6 +66,34 @@ var stream=null,vid=$("v"),camOn=false;
 var W=64,H=48,proc=document.createElement("canvas");proc.width=W;proc.height=H;
 var pctx=proc.getContext("2d",{willReadFrequently:true});
 var buf=[],MAXS=12,hrEst=null,hrvEst=null,quality=0,arousal=0.5,baseHR=null,hrHist=[],camManual=false,coverage=0;
+var hrStd=null,hrvBase=null,hrvStd=null;
+
+/* ---------- personal profile (localStorage) + crash-safe backup ----------
+   #1 baseline persists across sessions -> adaptation engages immediately instead
+      of running fixed for the first ~20-30s while it relearns "normal". The
+      webcam has cleared the gate on almost no session, so a persisted baseline
+      is what lets even a brief clean window drive the dose.
+   #2 the session's reads are mirrored to localStorage every 15s + on pagehide,
+      so a crash/force-quit doesn't lose the run (recover link shows next load).
+   #3 arousal is scored against YOUR HR/HRV spread; hr_z is logged per row. */
+var PKEY="glab_profile_v1",BKEY="glab_backup_v1";
+function loadProfile(){try{return JSON.parse(localStorage.getItem(PKEY));}catch(e){return null;}}
+function saveProfile(p){try{localStorage.setItem(PKEY,JSON.stringify(p));}catch(e){}}
+function applyProfile(){var p=loadProfile();if(p){if(p.hrMean)baseHR=p.hrMean;if(p.hrStd)hrStd=p.hrStd;if(p.hrvMean)hrvBase=p.hrvMean;if(p.hrvStd)hrvStd=p.hrvStd;}}
+function updateProfile(){
+  var hv=reads.map(function(r){return r.hr;}).filter(function(x){return x!=null;});
+  if(hv.length<8)return; // too little clean pulse this session to learn from
+  var sm=mean(hv),ss=Math.max(3,std(hv));
+  var vv=reads.map(function(r){return r.hrv;}).filter(function(x){return x!=null;});
+  var vm=vv.length?mean(vv):null,vs=vv.length?Math.max(5,std(vv)):null;
+  var p=loadProfile()||{n:0},a=p.n?0.3:1.0;  // EMA: recent sessions matter, don't fully overwrite
+  p.hrMean=p.hrMean?(1-a)*p.hrMean+a*sm:sm;
+  p.hrStd=p.hrStd?(1-a)*p.hrStd+a*ss:ss;
+  if(vm!=null){p.hrvMean=p.hrvMean?(1-a)*p.hrvMean+a*vm:vm;p.hrvStd=p.hrvStd?(1-a)*p.hrvStd+a*vs:vs;}
+  p.n=(p.n||0)+1;p.updated=new Date().toISOString();saveProfile(p);
+}
+function backupSession(){try{localStorage.setItem(BKEY,JSON.stringify({startedISO:startedISO,epoch:Date.now(),reads:reads}));}catch(e){}}
+function clearBackup(){try{localStorage.removeItem(BKEY);}catch(e){}}
 
 /* ---------- localhost bridge fallback (browsers without a camera API, e.g. Steam overlay):
              hr_bridge.py does the identical POS read on this machine and serves derived
@@ -88,7 +116,7 @@ function stopBridge(){if(bridgeTimer){clearInterval(bridgeTimer);bridgeTimer=nul
 /* ---------- aim-adaptive read: gameplay_read.py serves a rolling motor-tempo
              arousal (mouse/aim/action rate vs your own baseline) on localhost.
              Blended with the HR arousal to drive coupling depth. */
-var aimOn=false,aimArousal=0.5,aimQual=0,aimApm=null,aimTimer=null,aimFails=0,AIMURL="http://127.0.0.1:8788/aim";
+var aimOn=false,aimArousal=0.5,aimQual=0,aimApm=null,aimActive=null,aimTimer=null,aimFails=0,AIMURL="http://127.0.0.1:8788/aim";
 function startAim(){
   if(aimTimer)return;
   aimTimer=setInterval(function(){
@@ -97,6 +125,7 @@ function startAim(){
       aimArousal=clamp(j.arousal!=null?+j.arousal:0.5,0,1);
       aimQual=clamp(+j.quality||0,0,1);
       aimApm=j.apm!=null?+j.apm:null;
+      aimActive=j.active_frac!=null?+j.active_frac:null;  // mouse active fraction (engaged vs camping)
     }).catch(function(){if(++aimFails>=4){aimOn=false;aimQual=0;}});
   },500);
 }
@@ -171,17 +200,20 @@ function analyze(){
     var minD=Math.max(2,Math.round(bestLag*0.6)),pk=[];
     for(i=1;i<n-1;i++){if(s[i]>0.5&&s[i]>=s[i-1]&&s[i]>s[i+1]){if(!pk.length||i-pk[pk.length-1]>=minD)pk.push(i);}}
     if(pk.length>3){var ibi=[];for(i=1;i<pk.length;i++)ibi.push((buf[pk[i]].t-buf[pk[i-1]].t)*1000);var df=[];for(i=1;i<ibi.length;i++)df.push(ibi[i]-ibi[i-1]);if(df.length){var ms=0;for(i=0;i<df.length;i++)ms+=df[i]*df[i];hrvEst=Math.sqrt(ms/df.length);}}
-    if(baseHR==null&&hrHist.length>=Math.round(fps*20))baseHR=median(hrHist);
-    var hrT=baseHR?clamp((hrEst-baseHR)/12+0.5,0,1):0.5,hrvT=hrvEst!=null?clamp(1-hrvEst/80,0,1):0.5;
+    // bootstrap baseline/spread within-session only if no persisted profile seeded them
+    if(hrHist.length>=Math.round(fps*20)){if(baseHR==null)baseHR=median(hrHist);if(hrStd==null){var ss=std(hrHist);if(ss>1)hrStd=Math.max(3,ss);}}
+    var scale=hrStd?clamp(hrStd*2,8,20):12;  // bpm rise mapping to +0.5 arousal, personalized
+    var hrT=baseHR?clamp((hrEst-baseHR)/scale+0.5,0,1):0.5,hrvT=hrvEst!=null?clamp(1-hrvEst/80,0,1):0.5;
     arousal=clamp(0.6*hrT+0.4*hrvT,0,1);
   }
 }
 
 /* ---------- phase-locked AV write, adaptive coupling ---------- */
-var ctx=null,nodes=null,raf=null,ctrl=null,running=false,depth=1.0,startedISO=null,reads=[],lastFrame=0;
+var ctx=null,nodes=null,raf=null,ctrl=null,running=false,depth=1.0,startedISO=null,reads=[],lastFrame=0,lastBackup=0;
 function noiseBuf(c){var len=c.sampleRate*2,b=c.createBuffer(1,len,c.sampleRate),d=b.getChannelData(0),last=0;for(var i=0;i<len;i++){var w=Math.random()*2-1;last=(last+0.02*w)/1.02;d[i]=last*3.5;}return b;}
 $("vol").oninput=function(){if(nodes)nodes.master.gain.setTargetAtTime(this.value/100,ctx.currentTime,0.05);};
 function start(){
+  applyProfile();lastBackup=performance.now();   // seed baseline from prior sessions (#1)
   var wave=$("wave").value,vol=+$("vol").value/100,adapt=$("cam").checked;
   ctx=new(window.AudioContext||window.webkitAudioContext)();if(ctx.resume)ctx.resume();
   var src=ctx.createBufferSource();src.buffer=noiseBuf(ctx);src.loop=true;
@@ -208,7 +240,9 @@ function start(){
     var adapting=comb!=null;
     depth=adapting?(0.55+0.45*comb):1.0;
     try{nodes.dep.gain.setTargetAtTime(nodes.baseDep*depth,ctx.currentTime,0.15);if(nodes.td)nodes.td.gain.setTargetAtTime(0.25*depth,ctx.currentTime,0.15);}catch(e){}
-    reads.push({t:+(performance.now()/1000).toFixed(2),epoch:+(Date.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,arousal:+arousal.toFixed(3),aim_arousal:+aimArousal.toFixed(3),aim_apm:aimApm!=null?Math.round(aimApm):null,combined:comb!=null?+comb.toFixed(3):null,depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:adapting,src:adaptSrc});
+    var hrZ=(hrEst&&baseHR&&hrStd)?+((hrEst-baseHR)/hrStd).toFixed(2):null;
+    reads.push({t:+(performance.now()/1000).toFixed(2),epoch:+(Date.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,hr_z:hrZ,arousal:+arousal.toFixed(3),aim_arousal:+aimArousal.toFixed(3),aim_apm:aimApm!=null?Math.round(aimApm):null,aim_active:aimActive!=null?+aimActive.toFixed(2):null,combined:comb!=null?+comb.toFixed(3):null,depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:adapting,src:adaptSrc});
+    if(performance.now()-lastBackup>15000){lastBackup=performance.now();backupSession();}   // #2 crash-safe
     var warn=(performance.now()-lastFrame>1000?'<span class="bad">⚠ light throttled — click 📌 pin</span> · ':'');
     $("stat").innerHTML=warn+"depth <b>"+depth.toFixed(2)+"</b> · "+(adapting?('<span class="ok">adapting·'+adaptSrc+'</span>'+(camOK?' · HR '+(hrEst?Math.round(hrEst):"—"):'')+(aimOK?' · APM '+(aimApm!=null?Math.round(aimApm):"—"):'')+' · arousal '+(comb*100).toFixed(0)+'%'):('<span class="bad">'+(($("cam").checked||$("aim").checked)?"acquiring…":"fixed")+'</span>'))+" · q "+(quality*100).toFixed(0)+"%"+($("aim").checked?" · aimq "+(aimQual*100).toFixed(0)+"%":"");
   },250);
@@ -226,19 +260,30 @@ function stop(){
   if(nodes){if(nodes.shamJ)clearInterval(nodes.shamJ);nodes.master.gain.linearRampToValueAtTime(0,ctx.currentTime+0.3);(function(c,n){setTimeout(function(){try{n.src.stop();n.lfo.stop();if(n.tlfo)n.tlfo.stop();c.close();}catch(e){}},400);})(ctx,nodes);nodes=null;}
   if(raf){CAF(raf);raf=null;}flick.style.background="#000";stopCam();stopBridge();stopAim();
   var b=$("go");b.textContent="▶ start";b.classList.remove("stop");
-  if(reads.length)saveRead();reads=[];hrEst=hrvEst=baseHR=null;hrHist=[];
+  if(reads.length){updateProfile();saveRead();clearBackup();}reads=[];hrEst=hrvEst=baseHR=hrStd=hrvBase=hrvStd=null;hrHist=[];
 }
-function saveRead(){
-  var ar=reads.map(function(r){return r.arousal;}),dp=reads.map(function(r){return r.depth;});
+function buildRec(rr,iso){
+  var num=function(sel){return rr.map(sel).filter(function(x){return x!=null;});};
   var avg=function(a){return a.length?+(a.reduce(function(x,y){return x+y;},0)/a.length).toFixed(3):null;};
-  var aimRows=reads.filter(function(r){return r.aim_apm!=null;});
-  var rec={schema:"g-lab/1",type:"bci_read",id:"flk_"+Date.now(),ts:startedISO||new Date().toISOString(),phase:"intervention",
+  var hrs=num(function(r){return r.hr;}),apms=num(function(r){return r.aim_apm;});
+  return {schema:"g-lab/1",type:"bci_read",id:"flk_"+Date.now(),ts:iso||new Date().toISOString(),phase:"intervention",
     read:lastSrc==="cam"?"rppg_camera":(lastSrc==="bridge"?"rppg_local_bridge":"none"),modality:"audiovisual",inputs:["rppg_hr","aim_tempo"],privacy:"derived_numbers_only_no_video_localhost_only",
-    summary:{samples:reads.length,mean_hr:hrEst?Math.round(hrEst):null,mean_arousal:avg(ar),mean_aim_arousal:avg(reads.map(function(r){return r.aim_arousal;})),mean_apm:aimRows.length?Math.round(aimRows.reduce(function(a,r){return a+r.aim_apm;},0)/aimRows.length):null,mean_depth:avg(dp),baseline_hr:baseHR?Math.round(baseHR):null},
-    timeseries:reads};
-  var blob=new Blob([JSON.stringify(rec,null,2)],{type:"application/json"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="bci_read_"+rec.ts.replace(/[:.]/g,"-")+".json";a.click();
+    profile:loadProfile(),
+    summary:{samples:rr.length,mean_hr:hrs.length?Math.round(mean(hrs)):null,hr_std:hrs.length?+std(hrs).toFixed(1):null,baseline_hr:baseHR?Math.round(baseHR):null,mean_hr_z:avg(num(function(r){return r.hr_z;})),mean_arousal:avg(num(function(r){return r.arousal;})),mean_aim_arousal:avg(num(function(r){return r.aim_arousal;})),mean_apm:apms.length?Math.round(mean(apms)):null,mean_aim_active:avg(num(function(r){return r.aim_active;})),mean_depth:avg(num(function(r){return r.depth;}))},
+    timeseries:rr};
 }
+function download(rec,tag){var blob=new Blob([JSON.stringify(rec,null,2)],{type:"application/json"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="bci_read_"+(tag||"")+rec.ts.replace(/[:.]/g,"-")+".json";a.click();}
+function saveRead(){download(buildRec(reads,startedISO));}
 $("go").onclick=function(){running?stop():start();};
+window.addEventListener("pagehide",function(){if(running&&reads.length)backupSession();});   // #2 last-moment save
+// #2 recovery: an unfinished session left in localStorage -> offer a one-click download
+(function(){var bk;try{bk=JSON.parse(localStorage.getItem(BKEY));}catch(e){}
+  if(bk&&bk.reads&&bk.reads.length){
+    var s=document.createElement("span");s.className="bad";s.style.cssText="cursor:pointer;margin-left:6px;text-decoration:underline;";
+    s.textContent="⭳ recover last session ("+bk.reads.length+" reads)";
+    s.onclick=function(){download(buildRec(bk.reads,bk.startedISO),"RECOVERED_");clearBackup();s.remove();};
+    $("bar").appendChild(s);
+  }})();
 })();
 </script>
 </body>

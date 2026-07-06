@@ -44,11 +44,18 @@ SETUP:
 
 AIM-ADAPTIVE (live): as well as logging, this serves a rolling motor-tempo
 "arousal" at http://127.0.0.1:8788/aim -- how fast/busy your aiming and inputs
-are right now versus your own session baseline (0.5 = at baseline, 1.0 = ~2x,
-0 = idle). The flicker page fetches it and blends it with the webcam HR arousal
-to set coupling depth, so behavioural engagement drives the dose too, not just
-heart rate. This is a motor-engagement proxy, NOT physiological arousal -- still
-timing/aggregate only, no key identity. Disable the server with --no-serve.
+are right now versus your baseline (0.5 = at baseline, 1.0 = ~2x, 0 = idle). The
+flicker page fetches it and blends it with the webcam HR arousal to set coupling
+depth, so behavioural engagement drives the dose too, not just heart rate. This
+is a motor-engagement proxy, NOT physiological arousal -- still timing/aggregate
+only, no key identity. Disable the server with --no-serve.
+
+The tempo read now includes ACTIVE_FRAC (fraction of polled ticks where the
+mouse actually moved) alongside APM / aim-speed / correction-rate, so idle
+camping is told apart from active dueling even at the same total path. The
+baseline PERSISTS across sessions in ~/.glab_aim_profile.json (EMA-merged), so
+"vs baseline" is vs how you usually play and is live from t=0 instead of after
+a 15s cold warm-up. Delete that file to reset your baseline.
 
 RUN (start this the moment you start the entrainment + game):
     python3 gameplay_read.py --minutes 30 --phase intervention
@@ -67,13 +74,39 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 AIM_STATE = {"arousal": 0.5, "quality": 0.0, "apm": None, "aim_speed": None,
-             "corr_rate": None, "epoch": 0.0, "src": "aim"}
+             "corr_rate": None, "active_frac": None, "epoch": 0.0, "src": "aim"}
 AIM_LOCK = threading.Lock()
+
+AIM_PROFILE_PATH = os.path.join(os.path.expanduser("~"), ".glab_aim_profile.json")
 
 
 def set_aim(**kw):
     with AIM_LOCK:
         AIM_STATE.update(kw)
+
+
+def load_aim_profile():
+    """Cross-session baseline of your typical tempo, so arousal is relative to
+    how you *usually* play (available from t=0) instead of a cold 15s warm-up."""
+    try:
+        with open(AIM_PROFILE_PATH) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def merge_aim_profile(session_med, prev):
+    """Pure: EMA-merge this session's median tempo into the stored profile.
+    Recent sessions weigh 0.3; first session seeds it outright. Testable."""
+    p = dict(prev) if prev else {"n": 0}
+    a = 0.3 if p.get("n") else 1.0
+    for k in ("apm", "aim_speed", "corr_rate", "active_frac"):
+        v = session_med.get(k)
+        if v is None:
+            continue
+        p[k] = (1 - a) * p[k] + a * v if p.get(k) is not None else v
+    p["n"] = (p.get("n") or 0) + 1
+    return p
 
 
 def rates_from_window(d_actions, d_path, d_corr, window_s):
@@ -88,7 +121,7 @@ def aim_arousal(cur, base):
     metrics that have a baseline. cur==base -> 0.5, cur==2*base -> 1.0,
     cur==0 -> 0.0. Returns 0.5 (neutral) until a baseline exists."""
     parts = []
-    for k in ("apm", "aim_speed", "corr_rate"):
+    for k in ("apm", "aim_speed", "corr_rate", "active_frac"):
         b = base.get(k)
         if b and b > 1e-6:
             parts.append(max(0.0, min(1.0, (cur[k] / b - 1.0) * 0.5 + 0.5)))
@@ -136,6 +169,8 @@ def window_metrics(key_ts, click_ts, mv_now, prev, t_now):
     ev = sorted(key_ts[prev["keys"]:k] + click_ts[prev["clicks"]:c])
     gaps = [(ev[i] - ev[i - 1]) * 1000.0 for i in range(1, len(ev))]
     dt = t_now - prev["t"]
+    d_samp = mv_now.get("samples", 0) - prev.get("samples", 0)   # moved ticks this window
+    d_tick = mv_now.get("ticks", 0) - prev.get("ticks", 0)       # total polled ticks
     row = {
         "t": round(t_now, 2),
         "keys": wk,
@@ -144,9 +179,11 @@ def window_metrics(key_ts, click_ts, mv_now, prev, t_now):
         "gap_med_ms": round(statistics.median(gaps), 1) if gaps else None,
         "path_px": round(mv_now["path_px"] - prev["path_px"], 1),
         "corrections": mv_now["corrections"] - prev["corrections"],
+        "active_frac": round(d_samp / d_tick, 3) if d_tick > 0 else None,
     }
     new_prev = {"t": t_now, "keys": k, "clicks": c,
-                "path_px": mv_now["path_px"], "corrections": mv_now["corrections"]}
+                "path_px": mv_now["path_px"], "corrections": mv_now["corrections"],
+                "samples": mv_now.get("samples", 0), "ticks": mv_now.get("ticks", 0)}
     return row, new_prev
 
 
@@ -180,7 +217,7 @@ def main():
     MOVE_MIN_DIST = 2.0       # px; ignores sub-pixel jitter
     MOVE_ANGLE_DEG = 100.0    # direction change beyond this = a "correction"
     MOVE_THROTTLE_S = 0.015   # ~66 Hz cap -- keeps the callback cheap to avoid input lag
-    mv = {"samples": 0, "path_px": 0.0, "corrections": 0,
+    mv = {"samples": 0, "ticks": 0, "path_px": 0.0, "corrections": 0,
           "last_x": None, "last_y": None, "last_angle": None, "last_t": None}
 
     t0 = time.perf_counter()
@@ -230,6 +267,7 @@ def main():
         while not poll_stop.is_set():
             try:
                 x, y = mc.position
+                mv["ticks"] += 1
                 process_move(mv, x, y, time.perf_counter() - t0, throttle_s=0.0)
             except Exception:
                 pass
@@ -250,11 +288,13 @@ def main():
     dur = args.minutes * 60.0
     out = args.out or f"gameplay_{started.replace(':', '-').replace('.', '-')}.json"
     snaps = []
-    prev = {"t": 0.0, "keys": 0, "clicks": 0, "path_px": 0.0, "corrections": 0}
+    prev = {"t": 0.0, "keys": 0, "clicks": 0, "path_px": 0.0, "corrections": 0,
+            "samples": 0, "ticks": 0}
 
     def snapshot(t_now):
         nonlocal prev
-        mv_now = {"path_px": mv["path_px"], "corrections": mv["corrections"]}
+        mv_now = {"path_px": mv["path_px"], "corrections": mv["corrections"],
+                  "samples": mv["samples"], "ticks": mv["ticks"]}
         row, prev = window_metrics(key_ts, click_ts, mv_now, prev, t_now)
         row["epoch"] = round(t0_epoch + t_now, 2)
         snaps.append(row)
@@ -275,27 +315,34 @@ def main():
             print(f"[g-lab] aim server not started ({e}) -- logging still works.")
 
     WINDOW_S = 4          # rolling window for the live tempo read
-    BASE_MIN = 15         # ~15 s of ticks before a baseline is trusted
-    win = deque(maxlen=WINDOW_S)      # per-tick (d_actions, d_path, d_corr)
+    BASE_MIN = 15         # ~15 s of ticks before a within-session baseline is trusted
+    win = deque(maxlen=WINDOW_S)      # per-tick (d_actions, d_path, d_corr, d_samples, d_ticks)
     hist = []                          # cur dicts, for the rolling baseline
-    last = {"actions": 0, "path": 0.0, "corr": 0}
+    last = {"actions": 0, "path": 0.0, "corr": 0, "samples": 0, "ticks": 0}
+    pbase = load_aim_profile()         # cross-session baseline (#4): score vs typical play from t=0
 
     def update_aim(now_rel):
         a_now, p_now, c_now = len(key_ts) + len(click_ts), mv["path_px"], mv["corrections"]
-        win.append((a_now - last["actions"], p_now - last["path"], c_now - last["corr"]))
-        last.update(actions=a_now, path=p_now, corr=c_now)
+        s_now, tk_now = mv["samples"], mv["ticks"]
+        win.append((a_now - last["actions"], p_now - last["path"], c_now - last["corr"],
+                    s_now - last["samples"], tk_now - last["ticks"]))
+        last.update(actions=a_now, path=p_now, corr=c_now, samples=s_now, ticks=tk_now)
         cur = rates_from_window(sum(x[0] for x in win), sum(x[1] for x in win),
                                 sum(x[2] for x in win), len(win))
+        d_tick = sum(x[4] for x in win)
+        cur["active_frac"] = round(sum(x[3] for x in win) / d_tick, 3) if d_tick > 0 else 0.0
         hist.append(cur)
         del hist[:-240]
-        if len(hist) >= BASE_MIN:
+        if pbase and len(win) >= 2:            # persisted profile -> live immediately
+            ar, q = aim_arousal(cur, pbase), 0.7
+        elif len(hist) >= BASE_MIN:            # no profile yet -> within-session baseline
             base = {k: statistics.median([h[k] for h in hist]) for k in cur}
             ar, q = aim_arousal(cur, base), 0.8
         else:
-            ar, q = 0.5, 0.2  # warming up: neutral, below the page's gate
+            ar, q = 0.5, 0.2                    # warming up: neutral, below the page's gate
         set_aim(arousal=ar, quality=q, apm=round(cur["apm"], 1),
                 aim_speed=round(cur["aim_speed"], 1), corr_rate=round(cur["corr_rate"], 1),
-                epoch=round(t0_epoch + now_rel, 2))
+                active_frac=cur["active_frac"], epoch=round(t0_epoch + now_rel, 2))
 
     print(f"[g-lab] reading key/click TIMING only (no text) for {args.minutes:g} min.")
     print(f"[g-lab] snapshots every {args.snap:g}s -> {out}")
@@ -320,6 +367,14 @@ def main():
         tail = time.perf_counter() - t0
         if tail - prev["t"] > 1.0:
             snapshot(tail)
+        # #4: fold this session's median tempo into the cross-session aim profile
+        if len(hist) >= BASE_MIN:
+            sess_med = {k: statistics.median([h[k] for h in hist])
+                        for k in ("apm", "aim_speed", "corr_rate", "active_frac")}
+            try:
+                write_json(merge_aim_profile(sess_med, pbase), AIM_PROFILE_PATH)
+            except OSError:
+                pass
 
     actual = time.perf_counter() - t0
     actions = sorted(key_ts + click_ts)
@@ -348,6 +403,7 @@ def main():
             "avg_speed_px_s": round(mv["path_px"] / actual, 1) if actual > 0 else None,
             "corrections": mv["corrections"],
             "corrections_per_min": round(mv["corrections"] / (actual / 60.0), 2) if actual > 0 else None,
+            "active_frac": round(mv["samples"] / mv["ticks"], 3) if mv["ticks"] else None,
         },
     }
 
