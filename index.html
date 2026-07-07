@@ -73,6 +73,7 @@ var W=64,H=48,proc=document.createElement("canvas");proc.width=W;proc.height=H;
 var pctx=proc.getContext("2d",{willReadFrequently:true});
 var buf=[],MAXS=12,hrEst=null,hrvEst=null,quality=0,arousal=0.5,baseHR=null,hrHist=[],camManual=false,coverage=0;
 var hrStd=null,hrvBase=null,hrvStd=null;
+var faceDet=null,faceBox=null,lastFace=0,qPeak=0;   // FaceDetector -> forehead ROI; qPeak for the acquisition meter
 
 /* ---------- personal profile (localStorage) + crash-safe backup ----------
    #1 baseline persists across sessions -> adaptation engages immediately instead
@@ -163,10 +164,13 @@ function startCam(){
       if(caps.focusMode&&caps.focusMode.indexOf("manual")>=0)adv.push({focusMode:"manual"});
       if(adv.length)tr.applyConstraints({advanced:adv}).then(function(){camManual=true;}).catch(function(){});
     }catch(e){}
+    // Shape Detection API (Chrome/Edge): locate the face so the ROI sits on the
+    // FOREHEAD — the best rPPG site (strong perfusion, little motion, no hair/glare).
+    try{if(window.FaceDetector)faceDet=new FaceDetector({fastMode:true,maxDetectedFaces:1});}catch(e){faceDet=null;}
     RAF(sample);
   }).catch(function(e){settled=true;camOn=false;startBridge();});
 }
-function stopCam(){camOn=false;if(stream)stream.getTracks().forEach(function(t){t.stop();});stream=null;buf=[];}
+function stopCam(){camOn=false;if(stream)stream.getTracks().forEach(function(t){t.stop();});stream=null;buf=[];faceDet=null;faceBox=null;}
 var lastSample=0,lastAnalyze=0;
 function sample(ts){
   if(!camOn)return;
@@ -174,13 +178,18 @@ function sample(ts){
   // throttle the EXPENSIVE work off the game's critical path:
   //   getImageData at ~30 Hz (plenty for HR); autocorrelation at ~2 Hz.
   //   Only the flicker loop runs at full display rate.
+  // low-rate face detection (async, ~2 Hz) -> forehead ROI when a face is found
+  if(faceDet&&t-lastFace>=0.5){lastFace=t;faceDet.detect(vid).then(function(f){faceBox=(f&&f.length)?f[0].boundingBox:null;}).catch(function(){faceBox=null;});}
   if(t-lastSample>=0.033){ lastSample=t;
-    try{var vW=vid.videoWidth||640,vH=vid.videoHeight||480;
-      pctx.drawImage(vid,vW*0.30,vH*0.22,vW*0.40,vH*0.28,0,0,W,H);
+    try{var vW=vid.videoWidth||640,vH=vid.videoHeight||480,rx,ry,rw,rh;
+      if(faceBox&&faceBox.width>20){   // forehead strip: top of the face box, centered
+        rx=faceBox.x+faceBox.width*0.20;ry=faceBox.y+faceBox.height*0.03;rw=faceBox.width*0.60;rh=faceBox.height*0.30;
+      }else{rx=vW*0.30;ry=vH*0.22;rw=vW*0.40;rh=vH*0.28;}
+      pctx.drawImage(vid,rx,ry,rw,rh,0,0,W,H);
       var d=pctx.getImageData(0,0,W,H).data,rs=0,gs=0,bs=0,cnt=0,tot=W*H,r,g,b;
       for(var i=0;i<d.length;i+=4){r=d[i];g=d[i+1];b=d[i+2];
-        // skin mask: reddish, mid-bright, not clipped -> excludes background/hair/shadow/glare
-        if(r>60&&r<250&&r>g&&g>=b&&(r-b)>12){rs+=r;gs+=g;bs+=b;cnt++;}}
+        // skin mask: reddish, mid-bright, no channel near clip -> excludes background/hair/shadow/glare
+        if(r>60&&r<248&&g<248&&b<248&&r>g&&g>=b&&(r-b)>12){rs+=r;gs+=g;bs+=b;cnt++;}}
       coverage=cnt/tot;
       if(cnt<tot*0.12){for(i=0,rs=gs=bs=0;i<d.length;i+=4){rs+=d[i];gs+=d[i+1];bs+=d[i+2];}cnt=tot;} // fallback: whole ROI
       buf.push({t:t,r:rs/cnt,g:gs/cnt,b:bs/cnt});while(buf.length&&t-buf[0].t>MAXS)buf.shift();
@@ -212,6 +221,7 @@ function analyze(){
   // quality = peak prominence (SNR-like) × face-coverage: adapts only on a genuine, well-captured pulse
   var acAbs=acs.reduce(function(x,y){return x+Math.abs(y);},0)/(acs.length||1);
   quality=clamp((best-acAbs)/(Math.abs(best)+1e-6),0,1)*clamp(coverage*2.5,0.4,1);
+  if(quality>qPeak)qPeak=quality;
   if(bestLag>0&&quality>0.3){
     var hr=60/(bestLag/fps);hrEst=hrEst==null?hr:0.8*hrEst+0.2*hr;hrHist.push(hrEst);if(hrHist.length>240)hrHist.shift();
     var minD=Math.max(2,Math.round(bestLag*0.6)),pk=[];
@@ -230,7 +240,7 @@ var ctx=null,nodes=null,raf=null,ctrl=null,running=false,depth=1.0,startedISO=nu
 function noiseBuf(c){var len=c.sampleRate*2,b=c.createBuffer(1,len,c.sampleRate),d=b.getChannelData(0),last=0;for(var i=0;i<len;i++){var w=Math.random()*2-1;last=(last+0.02*w)/1.02;d[i]=last*3.5;}return b;}
 $("vol").oninput=function(){if(nodes)nodes.master.gain.setTargetAtTime(this.value/100,ctx.currentTime,0.05);};
 function start(){
-  applyProfile();lastBackup=performance.now();reqWake();   // seed baseline (#1); keep phone screen awake
+  applyProfile();lastBackup=performance.now();reqWake();qPeak=0;faceBox=null;   // seed baseline (#1); keep phone screen awake
   var wave=$("wave").value,vol=+$("vol").value/100,adapt=$("cam").checked;
   ctx=new(window.AudioContext||window.webkitAudioContext)();if(ctx.resume)ctx.resume();
   var src=ctx.createBufferSource();src.buffer=noiseBuf(ctx);src.loop=true;
@@ -263,7 +273,15 @@ function start(){
     drawSpark();
     var warn=(performance.now()-lastFrame>1000?'<span class="bad">⚠ light throttled — click 📌 pin</span> · ':'')
       +(measHz?'<span class="'+(measHz>=88?'ok':'bad')+'">'+measHz+'Hz'+(measHz<88?' — flicker degraded, need 120Hz display':'')+'</span> · ':'');
-    $("stat").innerHTML=warn+"depth <b>"+depth.toFixed(2)+"</b> · "+(adapting?('<span class="ok">adapting·'+adaptSrc+'</span>'+(camOK?' · HR '+(hrEst?Math.round(hrEst):"—"):'')+(aimOK?' · APM '+(aimApm!=null?Math.round(aimApm):"—"):'')+' · arousal '+(comb*100).toFixed(0)+'%'):('<span class="bad">'+(($("cam").checked||$("aim").checked)?"acquiring…":"fixed")+'</span>'))+" · q "+(quality*100).toFixed(0)+"%"+($("aim").checked?" · aimq "+(aimQual*100).toFixed(0)+"%":"");
+    // acquisition guidance: when the camera is on but below the 0.4 gate, say WHY so
+    // the fix (light/position) is a live loop, not guesswork. peak-q shows best seen.
+    var camHint="";
+    if($("cam").checked&&hrSrc&&!camOK){
+      camHint=coverage<0.12?' — no face: center in frame'
+        :(hrEst==null?' — add light on your face + hold still':' — almost: steadier light')
+        +' (peak '+(qPeak*100).toFixed(0)+'%)'+(faceDet?' ·forehead-locked':'');
+    }
+    $("stat").innerHTML=warn+"depth <b>"+depth.toFixed(2)+"</b> · "+(adapting?('<span class="ok">adapting·'+adaptSrc+'</span>'+(camOK?' · HR '+(hrEst?Math.round(hrEst):"—"):'')+(aimOK?' · APM '+(aimApm!=null?Math.round(aimApm):"—"):'')+' · arousal '+(comb*100).toFixed(0)+'%'):('<span class="bad">'+(($("cam").checked||$("aim").checked)?"acquiring…":"fixed")+camHint+'</span>'))+" · q "+(quality*100).toFixed(0)+"%"+($("aim").checked?" · aimq "+(aimQual*100).toFixed(0)+"%":"");
   },250);
   // square 40 Hz light off the SAME audio clock -> phase-locked; θ-gated for tng; incoherent for sham
   var jt=0,jf=20,fc=0,ft=performance.now();lastFrame=performance.now();
