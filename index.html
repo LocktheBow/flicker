@@ -31,6 +31,7 @@
     <label class="muted">wave <select id="wave"><option value="tng" selected>θ-nested γ</option><option value="gamma40">40 Hz γ</option><option value="sham">sham</option></select></label>
     <label class="muted"><input type="checkbox" id="cam" checked> webcam adapt</label>
     <label class="muted"><input type="checkbox" id="aim" checked> aim adapt</label>
+    <label class="muted" title="blink/eye-activity arousal proxy (needs face detection; NOT pupillometry, NOT a BCI; unverified on real cameras)"><input type="checkbox" id="eye"> eye (beta)</label>
     <label class="muted">vol <input type="range" id="vol" min="0" max="60" step="1" value="22" style="width:64px;vertical-align:middle;"></label>
     <span class="muted" id="stat">phase-locked AV · idle</span>
     <canvas id="spark" width="150" height="26" title="live dose: blue = coupling depth (wiggling = adapting to you, flat = fixed) · green ticks = adaptive samples" style="vertical-align:middle;background:#010409;border:1px solid #21262d;border-radius:4px;"></canvas>
@@ -74,6 +75,11 @@ var pctx=proc.getContext("2d",{willReadFrequently:true});
 var buf=[],MAXS=12,hrEst=null,hrvEst=null,quality=0,arousal=0.5,baseHR=null,hrHist=[],camManual=false,coverage=0;
 var hrStd=null,hrvBase=null,hrvStd=null;
 var faceDet=null,faceBox=null,lastFace=0,qPeak=0;   // FaceDetector -> forehead ROI; qPeak for the acquisition meter
+// eye-activity read (beta): blink-based arousal PROXY off the same webcam. NOT pupillometry
+// (glasses kill iris/pupil contrast), NOT a BCI (no neural signal). Gated + default-off.
+var eW=48,eH=16,eproc=document.createElement("canvas");eproc.width=eW;eproc.height=eH;
+var ectx=eproc.getContext("2d",{willReadFrequently:true});
+var eyeArousal=0.5,eyeQual=0,eyeBlinkRate=null,blinkTs=[],eyeBase=null,eyeUp=false,lastBlink=0,eyeDevHist=[];
 
 /* ---------- personal profile (localStorage) + crash-safe backup ----------
    #1 baseline persists across sessions -> adaptation engages immediately instead
@@ -194,9 +200,33 @@ function sample(ts){
       if(cnt<tot*0.12){for(i=0,rs=gs=bs=0;i<d.length;i+=4){rs+=d[i];gs+=d[i+1];bs+=d[i+2];}cnt=tot;} // fallback: whole ROI
       buf.push({t:t,r:rs/cnt,g:gs/cnt,b:bs/cnt});while(buf.length&&t-buf[0].t>MAXS)buf.shift();
       if(buf.length>60&&t-lastAnalyze>=0.5){lastAnalyze=t;analyze();}
+      // eye-activity: sample an eye-band strip (needs a detected face) and detect blinks
+      if($("eye").checked&&faceBox&&faceBox.width>24){
+        var ex=faceBox.x+faceBox.width*0.15,ey=faceBox.y+faceBox.height*0.30,ew2=faceBox.width*0.70,eh2=faceBox.height*0.16;
+        ectx.drawImage(vid,ex,ey,ew2,eh2,0,0,eW,eH);
+        var ed=ectx.getImageData(0,0,eW,eH).data,ebr=0,kk;for(kk=0;kk<ed.length;kk+=4)ebr+=ed[kk]+ed[kk+1]+ed[kk+2];
+        detectBlink(t,ebr/(eW*eH*3));
+      }else if(!faceBox){eyeQual=0;}
     }catch(e){}
   }
   RAF(sample);
+}
+// blink detector: eyelid closing briefly lightens the eye-band (covers the dark eye).
+// Online edge-detect against a slow baseline; adaptive threshold from recent variance.
+// Rate -> an EXPERIMENTAL arousal proxy (elevated blinking ~ higher arousal). Survives
+// glasses (eyelid motion is gross); does NOT read pupil. Contributes only when eyeQual is high.
+function detectBlink(t,ebr){
+  if(eyeBase==null){eyeBase=ebr;return;}
+  eyeBase=0.97*eyeBase+0.03*ebr;
+  var dev=ebr-eyeBase;eyeDevHist.push(Math.abs(dev));if(eyeDevHist.length>200)eyeDevHist.shift();
+  var noise=Math.max(1.5,(mean(eyeDevHist)||0)*3);
+  if(dev>noise&&!eyeUp&&t-lastBlink>0.2){blinkTs.push(t);lastBlink=t;eyeUp=true;}
+  if(dev<noise*0.4)eyeUp=false;
+  while(blinkTs.length&&t-blinkTs[0]>60)blinkTs.shift();
+  var span=blinkTs.length?(t-blinkTs[0]):0;
+  eyeBlinkRate=span>10?+(blinkTs.length/span*60).toFixed(1):null;
+  eyeQual=eyeBlinkRate!=null?clamp((mean(eyeDevHist)||0)/4,0,1):0;
+  if(eyeBlinkRate!=null)eyeArousal=clamp(0.5+(eyeBlinkRate-15)/25,0,1);
 }
 function median(a){var s=a.slice().sort(function(x,y){return x-y;}),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;}
 function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
@@ -240,7 +270,7 @@ var ctx=null,nodes=null,raf=null,ctrl=null,running=false,depth=1.0,startedISO=nu
 function noiseBuf(c){var len=c.sampleRate*2,b=c.createBuffer(1,len,c.sampleRate),d=b.getChannelData(0),last=0;for(var i=0;i<len;i++){var w=Math.random()*2-1;last=(last+0.02*w)/1.02;d[i]=last*3.5;}return b;}
 $("vol").oninput=function(){if(nodes)nodes.master.gain.setTargetAtTime(this.value/100,ctx.currentTime,0.05);};
 function start(){
-  applyProfile();lastBackup=performance.now();reqWake();qPeak=0;faceBox=null;   // seed baseline (#1); keep phone screen awake
+  applyProfile();lastBackup=performance.now();reqWake();qPeak=0;faceBox=null;eyeBase=null;blinkTs=[];eyeDevHist=[];eyeQual=0;eyeBlinkRate=null;   // seed baseline (#1); keep phone screen awake
   var wave=$("wave").value,vol=+$("vol").value/100,adapt=$("cam").checked;
   ctx=new(window.AudioContext||window.webkitAudioContext)();if(ctx.resume)ctx.resume();
   var src=ctx.createBufferSource();src.buffer=noiseBuf(ctx);src.loop=true;
@@ -259,16 +289,19 @@ function start(){
     var hrSrc=camOn?"cam":(bridgeOn?"bridge":null);if(hrSrc)lastSrc=hrSrc;
     var camOK=$("cam").checked&&hrSrc&&quality>0.4;
     var aimOK=$("aim").checked&&aimOn&&aimQual>0.3;
-    var comb,adaptSrc;
-    if(camOK&&aimOK){comb=0.6*arousal+0.4*aimArousal;adaptSrc="cam+aim";}   // HR weighted higher
-    else if(camOK){comb=arousal;adaptSrc="cam";}
-    else if(aimOK){comb=aimArousal;adaptSrc="aim";}
-    else{comb=null;adaptSrc=null;}
+    var eyeOK=$("eye").checked&&faceBox&&eyeQual>0.4;   // beta, gated hard so garbage never feeds the dose
+    // weighted average of whatever real sources are live (HR heaviest, eye lightest)
+    var parts=[],labs=[];
+    if(camOK){parts.push([arousal,0.5]);labs.push("cam");}
+    if(aimOK){parts.push([aimArousal,0.35]);labs.push("aim");}
+    if(eyeOK){parts.push([eyeArousal,0.15]);labs.push("eye");}
+    var comb=null,adaptSrc=null;
+    if(parts.length){var vs=0,ws=0;parts.forEach(function(p){vs+=p[0]*p[1];ws+=p[1];});comb=vs/ws;adaptSrc=labs.join("+");}
     var adapting=comb!=null;
     depth=adapting?(0.55+0.45*comb):1.0;
     try{nodes.dep.gain.setTargetAtTime(nodes.baseDep*depth,ctx.currentTime,0.15);if(nodes.td)nodes.td.gain.setTargetAtTime(0.25*depth,ctx.currentTime,0.15);}catch(e){}
     var hrZ=(hrEst&&baseHR&&hrStd)?+((hrEst-baseHR)/hrStd).toFixed(2):null;
-    reads.push({t:+(performance.now()/1000).toFixed(2),epoch:+(Date.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,hr_z:hrZ,arousal:+arousal.toFixed(3),aim_arousal:+aimArousal.toFixed(3),aim_apm:aimApm!=null?Math.round(aimApm):null,aim_active:aimActive!=null?+aimActive.toFixed(2):null,combined:comb!=null?+comb.toFixed(3):null,depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:adapting,src:adaptSrc});
+    reads.push({t:+(performance.now()/1000).toFixed(2),epoch:+(Date.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,hr_z:hrZ,arousal:+arousal.toFixed(3),aim_arousal:+aimArousal.toFixed(3),aim_apm:aimApm!=null?Math.round(aimApm):null,aim_active:aimActive!=null?+aimActive.toFixed(2):null,eye_arousal:eyeOK?+eyeArousal.toFixed(3):null,eye_blink:eyeBlinkRate,combined:comb!=null?+comb.toFixed(3):null,depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:adapting,src:adaptSrc});
     if(performance.now()-lastBackup>15000){lastBackup=performance.now();backupSession();}   // #2 crash-safe
     drawSpark();
     var warn=(performance.now()-lastFrame>1000?'<span class="bad">⚠ light throttled — click 📌 pin</span> · ':'')
