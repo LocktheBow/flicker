@@ -222,7 +222,7 @@ function analyze(){
 }
 
 /* ---------- phase-locked AV write, adaptive coupling ---------- */
-var ctx=null,nodes=null,raf=null,ctrl=null,running=false,depth=1.0,startedISO=null,reads=[],lastFrame=0,lastBackup=0;
+var ctx=null,nodes=null,raf=null,ctrl=null,running=false,depth=1.0,startedISO=null,reads=[],lastFrame=0,lastBackup=0,measHz=0;
 function noiseBuf(c){var len=c.sampleRate*2,b=c.createBuffer(1,len,c.sampleRate),d=b.getChannelData(0),last=0;for(var i=0;i<len;i++){var w=Math.random()*2-1;last=(last+0.02*w)/1.02;d[i]=last*3.5;}return b;}
 $("vol").oninput=function(){if(nodes)nodes.master.gain.setTargetAtTime(this.value/100,ctx.currentTime,0.05);};
 function start(){
@@ -257,7 +257,8 @@ function start(){
     reads.push({t:+(performance.now()/1000).toFixed(2),epoch:+(Date.now()/1000).toFixed(2),hr:hrEst?Math.round(hrEst):null,hrv:hrvEst!=null?Math.round(hrvEst):null,hr_z:hrZ,arousal:+arousal.toFixed(3),aim_arousal:+aimArousal.toFixed(3),aim_apm:aimApm!=null?Math.round(aimApm):null,aim_active:aimActive!=null?+aimActive.toFixed(2):null,combined:comb!=null?+comb.toFixed(3):null,depth:+depth.toFixed(3),quality:+quality.toFixed(2),adapting:adapting,src:adaptSrc});
     if(performance.now()-lastBackup>15000){lastBackup=performance.now();backupSession();}   // #2 crash-safe
     drawSpark();
-    var warn=(performance.now()-lastFrame>1000?'<span class="bad">⚠ light throttled — click 📌 pin</span> · ':'');
+    var warn=(performance.now()-lastFrame>1000?'<span class="bad">⚠ light throttled — click 📌 pin</span> · ':'')
+      +(measHz?'<span class="'+(measHz>=88?'ok':'bad')+'">'+measHz+'Hz'+(measHz<88?' — flicker degraded, need 120Hz display':'')+'</span> · ':'');
     $("stat").innerHTML=warn+"depth <b>"+depth.toFixed(2)+"</b> · "+(adapting?('<span class="ok">adapting·'+adaptSrc+'</span>'+(camOK?' · HR '+(hrEst?Math.round(hrEst):"—"):'')+(aimOK?' · APM '+(aimApm!=null?Math.round(aimApm):"—"):'')+' · arousal '+(comb*100).toFixed(0)+'%'):('<span class="bad">'+(($("cam").checked||$("aim").checked)?"acquiring…":"fixed")+'</span>'))+" · q "+(quality*100).toFixed(0)+"%"+($("aim").checked?" · aimq "+(aimQual*100).toFixed(0)+"%":"");
   },250);
   // square 40 Hz light off the SAME audio clock -> phase-locked; θ-gated for tng; incoherent for sham
@@ -266,7 +267,7 @@ function start(){
     if(wave==="sham"){if(t-jt>0.7){jt=t;jf=5+Math.random()*40;}on=(Math.sin(2*Math.PI*jf*t)>=0)?1:0;}
     else{var g=(Math.sin(2*Math.PI*40*t)>=0)?1:0;var d=(wave==="tng")?((0.5+0.5*Math.sin(2*Math.PI*6*t))>0.5?1:0):1;on=g&&d;}
     flick.style.background=on?"#fff":"#000";fc++;lastFrame=performance.now();raf=RAF(loop);})();
-  setTimeout(function(){var hz=fc/((performance.now()-ft)/1000);flick.title=Math.round(hz)+" Hz "+(hz>=88?"OK":"need ~120Hz");},900);
+  setTimeout(function(){var hz=fc/((performance.now()-ft)/1000);measHz=Math.round(hz);flick.title=measHz+" Hz "+(hz>=88?"OK":"need ~120Hz");},900);
   running=true;startedISO=new Date().toISOString();var b=$("go");b.textContent="■ stop";b.classList.add("stop");
 }
 function stop(){
