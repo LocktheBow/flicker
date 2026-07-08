@@ -198,6 +198,8 @@
 <nav class="tabbar"><div class="in">
   <button class="tab" data-tab="console">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.4"/></svg>CONSOLE</button>
+  <button class="tab" data-tab="live">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M6.3 6.3a8 8 0 000 11.4M17.7 6.3a8 8 0 010 11.4M3.5 3.5a12 12 0 000 17M20.5 3.5a12 12 0 010 17"/></svg>LIVE</button>
   <button class="tab" data-tab="induct">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v6M12 15v6M4.9 7l4.2 4.2M14.9 12.8l4.2 4.2M3 12h6M15 12h6"/></svg>INDUCT</button>
   <button class="tab" data-tab="log">
@@ -259,6 +261,74 @@ async function pollFeeds(){
 }
 setInterval(pollFeeds, 1000);
 
+/* ---------- LIVE / IN-MATCH — waking self-hypnosis while you actually play ----------
+   You can't watch an overlay or click mid-fight, so this is AUDIO and hands-free:
+   short waking post-hypnotic cues on a cadence, and — the key move — an AROUSAL-
+   TRIGGERED auto re-anchor that fires the moment the feed sees you spike (tilt), with
+   no input from you. Deep trance is NOT the goal (you must stay sharp): this is the
+   on-demand re-centering that sports hypnosis actually trains. Keep volume low — you
+   still need to hear footsteps. A near-silent keepalive tone stops the browser from
+   throttling the cue timer while the game holds focus. */
+const live = { on:false, ctx:null, bed:null, keep:null, timer:null, lastCue:0, lastReanchor:0, cueGap:75 };
+const CUES = {
+  affirm:['You see it early. Trust the read.','Clear mind. Patterns pop.','Smooth and certain — you have time.','Locked in. One beat ahead.'],
+  activate:['Sharpen up. Lean in.','Eyes active. Pick up the pace.','Wake it up. Hunt.'],
+  calm:['Breathe out. Settle. Next play.','Hands quiet. Let it go. Reset.','Shoulders drop. Slow is smooth.']
+};
+const anchorWord = ()=> (S.cfg.anchor||'anchor').split('→')[0].trim();
+function speakLive(t){
+  if(window.speechSynthesis){ try{ const u=new SpeechSynthesisUtterance(t); u.rate=0.95; u.pitch=0.95;
+    const vEl=document.getElementById('liveVol'); u.volume=(vEl?+vEl.value:55)/100;
+    speechSynthesis.cancel(); speechSynthesis.speak(u); }catch(e){} }
+  const el=document.getElementById('liveLast'); if(el) el.textContent='“'+t+'”';
+}
+function pick(bank){ return bank[Math.floor(performance.now()/1000)%bank.length]; }
+function ensureCtx(){ try{ live.ctx=live.ctx||new(window.AudioContext||window.webkitAudioContext)(); if(live.ctx.resume)live.ctx.resume();
+  if(!live.keep){ const o=live.ctx.createOscillator(),g=live.ctx.createGain(); g.gain.value=0.0002; o.frequency.value=20; o.connect(g); g.connect(live.ctx.destination); o.start(); live.keep={o,g}; } }catch(e){} }
+function bedOn(){ ensureCtx(); try{ const c=live.ctx; const osc=c.createOscillator(),lfo=c.createOscillator(),lg=c.createGain(),g=c.createGain();
+  osc.frequency.value=110; lfo.frequency.value=0.1; lg.gain.value=0.5; g.gain.value=0; lfo.connect(lg); lg.connect(g.gain); osc.connect(g); g.connect(c.destination); osc.start(); lfo.start();
+  g.gain.setTargetAtTime(0.035,c.currentTime,1.5); live.bed={osc,lfo,g}; }catch(e){} }
+function bedOff(){ if(live.bed){ try{ live.bed.g.gain.setTargetAtTime(0,live.ctx.currentTime,0.4); const b=live.bed; setTimeout(()=>{try{b.osc.stop();b.lfo.stop();}catch(e){}},600); }catch(e){} live.bed=null; } }
+function liveTick(){
+  const now=performance.now()/1000, a=feeds.live?feeds.arousal:null;
+  if(a!=null && a>0.8 && now-live.lastReanchor>25){ live.lastReanchor=now; live.lastCue=now; speakLive(anchorWord()+'. '+pick(CUES.calm)); return; }
+  if(now-live.lastCue>=live.cueGap){ live.lastCue=now;
+    const bank = a==null?CUES.affirm : (a>0.65?CUES.calm : (a<0.4?CUES.activate:CUES.affirm));
+    speakLive(pick(bank)); }
+}
+function startLive(){ live.on=true; live.lastCue=0; live.lastReanchor=0; ensureCtx();
+  if(document.getElementById('bedTgl')&&document.getElementById('bedTgl').classList.contains('on')) bedOn();
+  speakLive(anchorWord()+'. You are in. '+pick(CUES.affirm));
+  live.timer=setInterval(liveTick,1000); renderLive(); refreshTop(); }
+function stopLive(){ live.on=false; if(live.timer)clearInterval(live.timer); live.timer=null; bedOff(); if(window.speechSynthesis)speechSynthesis.cancel(); renderLive(); }
+
+function renderLive(){
+  V.innerHTML = `
+    <div class="panel">
+      <p class="eyebrow">In-match uplink</p>
+      <h2>${live.on?'◉ LIVE — companion running':'Access the state while you play'}</h2>
+      <p class="lede" style="margin-top:8px">Audio only — eyes stay on the game. Short waking cues on a timer, plus an <b>auto re-anchor</b> the instant the feed sees you spike. Nothing to click mid-match. Keep it quiet enough to still hear footsteps.</p>
+      <div class="statgrid" style="margin-top:12px">
+        <div class="stat"><div class="k">LIVE INTAKE</div><div class="v" id="liveIntake">…</div></div>
+        <div class="stat"><div class="k">STATE</div><div class="v ${live.on?'warm':''}" id="liveState">${live.on?'RECEIVING':'IDLE'}</div></div>
+      </div>
+      <div class="field"><label>Voice volume</label><div class="slide"><input type="range" min="0" max="100" value="55" id="liveVol"><span class="sv" id="lv">55</span></div></div>
+      <div class="field"><label>Cue every (seconds)</label><div class="slide"><input type="range" min="30" max="150" step="5" value="${live.cueGap}" id="cueGap"><span class="sv" id="cg">${live.cueGap}</span></div></div>
+      <div class="field"><label>Ambient bed <span style="color:var(--muted2)">— off by default; a tone can mask footsteps</span></label>
+        <div class="toggle"><button class="chipbtn ${live.bed?'on':''}" id="bedTgl">${live.bed?'ON':'OFF'}</button></div></div>
+      <p class="lede" id="liveLast" style="text-align:center;color:var(--signal);min-height:22px;margin-top:6px"></p>
+    </div>
+    <button class="btn ${live.on?'':'primary'}" id="liveBtn">${live.on?'■ STOP LIVE':'◉ GO LIVE (IN-MATCH)'}</button>
+    <p class="lede" style="text-align:center;margin-top:10px">Prime once in <span style="color:var(--signal)">INDUCT</span> to set your anchor, then GO LIVE and queue. Fire your anchor gesture after deaths — the feed also auto-recenters you on a spike.</p>
+  `;
+  const go=id=>document.getElementById(id);
+  go('liveBtn').onclick=()=> live.on?stopLive():startLive();
+  go('liveVol').oninput=function(){go('lv').textContent=this.value;};
+  go('cueGap').oninput=function(){go('cg').textContent=this.value; live.cueGap=+this.value;};
+  go('bedTgl').onclick=function(){ this.classList.toggle('on'); this.textContent=this.classList.contains('on')?'ON':'OFF'; if(live.on){ this.classList.contains('on')?bedOn():bedOff(); } };
+  pollFeeds();
+}
+
 async function boot(){
   try{ const s = await store.get('hypnostate:sessions'); if(s) S.sessions = JSON.parse(s); }catch(e){}
   try{ const c = await store.get('hypnostate:cfg'); if(c) S.cfg = Object.assign(S.cfg, JSON.parse(c)); }catch(e){}
@@ -312,6 +382,7 @@ function route(tab){
   S.view=tab;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===tab));
   if(tab==='console') renderConsole();
+  if(tab==='live') renderLive();
   if(tab==='induct') renderInduct();
   if(tab==='log') renderLog();
   if(tab==='readout') renderReadout();
@@ -588,13 +659,20 @@ function quickAnchor(){
   let t=setTimeout(step,60);
 }
 
-/* ---------- FULL INDUCTION ---------- */
+/* ---------- FULL INDUCTION — grounded in real technique ----------
+   eye-fixation → progressive release → eye-catalepsy CONVINCER (Elman: demonstrating
+   responsiveness builds the expectancy that does the work) → FRACTIONATION (repeated
+   drop-in/out, each deeper — the cornerstone deepener) → biofeedback-GATED descent
+   (you don't go deeper until the live feed shows your arousal actually fell) →
+   IMAGERY rehearsal (psychoneuromuscular: imagined reps fire the same pathways —
+   the mechanism sports hypnosis actually uses) → payload → anchor + TEST → surface. */
 function startInduction(){
   const host=document.getElementById('overlayHost');
-  const scenes=['settle','breath','deepen','payload','anchor','surface'];
-  let idx=0, timers=[];
-  const clearT=()=>{timers.forEach(clearTimeout);timers=[];};
+  const scenes=['fixate','relax','convince','fractionate','deepen','imagery','payload','anchor','surface'];
+  let idx=0, timers=[], ivs=[];
+  const clearT=()=>{timers.forEach(clearTimeout);timers=[];ivs.forEach(clearInterval);ivs=[];};
   const wait=(fn,ms)=>timers.push(setTimeout(fn,ms));
+  const every=(fn,ms)=>{const id=setInterval(fn,ms);ivs.push(id);return id;};
 
   host.innerHTML=`<div class="ov"><div class="ovhead">
       <div class="prog" id="prog"></div><button class="close" id="indClose">END ✕</button>
@@ -605,95 +683,91 @@ function startInduction(){
   const sc=document.getElementById('scene');
   const setProg=()=>document.querySelectorAll('#prog .pd').forEach((d,i)=>d.classList.toggle('on',i<=idx));
   const go=()=>{ clearT(); idx++; if(idx>=scenes.length)return; setProg(); enter(scenes[idx]); };
-
-  function btns(html){ return `<div class="ovbtns">${html}</div>`; }
+  const btns=html=>`<div class="ovbtns">${html}</div>`;
 
   function enter(name){
     setProg();
-    if(name==='settle'){
-      sc.innerHTML=`<div class="stage">STAGE 01 · SETTLE</div>
-        <div class="line">Fix your eyes on the core.<br>Let the edges of the room blur.</div>
-        <div class="cyc" id="tick">easing in…</div>
-        ${btns(`<button class="btn primary" id="n">I'M SETTLED →</button>`)}`;
-      let c=6; const tk=document.getElementById('tick');
-      const dn=()=>{ tk.textContent = c>0? `${c}` : 'ready'; if(c>0){c--;wait(dn,1000);} };
-      dn(); document.getElementById('n').onclick=go; wait(go,8000);
+    if(name==='fixate'){
+      sc.innerHTML=`<div class="stage">STAGE 01 · EYE FIXATION</div>
+        <div class="breathwrap">${oscSVG(240,0)}<div class="orb" id="orb" style="transform:scale(.5)"></div><div class="phase">◉</div></div>
+        <div class="line">Fix on the core. Don't move your eyes.<br>Let your eyelids grow heavy… heavier with every breath.</div>
+        ${btns(`<button class="btn primary" id="n">MY EYES ARE HEAVY →</button>`)}`;
+      const orb=document.getElementById('orb'); let big=false;
+      every(()=>{orb.style.transitionDuration='2.6s';orb.style.transform=`scale(${big?.72:.5})`;big=!big;},2600);
+      document.getElementById('n').onclick=go; wait(go,15000);
     }
-    else if(name==='breath'){
-      sc.innerHTML=`<div class="stage">STAGE 02 · OPEN THE VALVE</div>
-        <div class="breathwrap">${oscSVG(240,0)}<div class="orb" id="orb"></div><div class="phase" id="phase">breathe in</div></div>
-        <div class="cyc" id="cyc">cycle 1 / 5</div>
-        <div class="cyc" id="bioLive" style="color:var(--signal)"></div>
-        ${btns(`<button class="btn ghost" id="skip">SKIP →</button>`)}`;
-      const orb=document.getElementById('orb'), phase=document.getElementById('phase'), cyc=document.getElementById('cyc');
-      const ringWrap=sc.querySelector('.breathwrap svg');
-      const phases=[['Breathe in',4000,1.0],['Hold',4000,1.0],['Breathe out',4000,.6],['Hold',3000,.6]];
-      const total=5; let ci=0, pi=0;
-      const ring=()=>{ // refresh gold fill by cycle progress
-        const r=240/2-14, C=2*Math.PI*r, prog=clamp(ci/total,0,1);
-        const c2=ringWrap.querySelectorAll('circle'); const bar=c2[c2.length-1];
-        bar.setAttribute('stroke-dashoffset', C*(1-prog));
-      };
-      const tick=()=>{
-        const [lbl,dur,scl]=phases[pi]; phase.textContent=lbl;
-        orb.style.transitionDuration=reduce?'.2s':(dur/1000)+'s'; orb.style.transform=`scale(${scl})`;
-        pi++; if(pi>=phases.length){pi=0;ci++;cyc.textContent=`cycle ${Math.min(ci+1,total)} / ${total}`;ring();}
-        if(ci>=total){ phase.textContent='valve open'; ring(); wait(go,1200); return; }
-        wait(tick,dur);
-      };
-      ring(); wait(tick,80);
-      document.getElementById('skip').onclick=go;
-    }
-    else if(name==='deepen'){
-      sc.innerHTML=`<div class="stage">STAGE 03 · DEEPEN</div><div class="count" id="cnt">7</div><div class="line small" id="dl">with every number, the intake widens</div>`;
-      const lines=['dropping deeper','the noise falls away','wider now','the signal is clear','you are receptive','almost there','open'];
-      let n=7; const cnt=document.getElementById('cnt'), dl=document.getElementById('dl');
-      const dn=()=>{ cnt.textContent=n; dl.textContent=lines[7-n]||'open'; n--; if(n>=1){wait(dn,1500);} else {wait(go,1400);} };
-      wait(dn,300);
-    }
-    else if(name==='payload'){
-      const lines=[
-        'Your eyes find the enemy before they commit.',
-        'The whole map is one shape in your mind — you always know where the fight is going.',
-        'Cooldowns run on a clock only you can hear.',
-        'Your aim is quiet and certain.',
-        'Deaths teach. They do not tilt you.',
-        'Every rotation you make is one beat ahead.',
-        'The IQ arriving now stays after you surface. It is yours to take home.'
-      ];
-      let li=0;
-      const paint=()=>{
-        sc.innerHTML=`<div class="stage">STAGE 04 · PAYLOAD · ${li+1}/${lines.length}</div>
-          <div class="line">${lines[li]}</div>
-          ${btns(li<lines.length-1?`<button class="btn primary" id="n">NEXT →</button>`:`<button class="btn primary" id="n">LOCK IT IN →</button>`)}`;
-        document.getElementById('n').onclick=()=>{ clearT(); if(li<lines.length-1){li++;paint();} else go(); };
-        if(li<lines.length-1) wait(()=>{li++;paint();},4600);
-      };
+    else if(name==='relax'){
+      const parts=['Let your eyes close now. Soft.','Relaxation spreads from your eyes across your face.','Down through your jaw, your neck — your shoulders drop.','Arms heavy. Hands heavy where they rest.','Chest, stomach — slow and easy.','All the way down. Nothing to hold onto.'];
+      let i=0;
+      const paint=()=>{ sc.innerHTML=`<div class="stage">STAGE 02 · RELEASE · ${i+1}/${parts.length}</div><div class="line">${parts[i]}</div><div class="cyc" id="bioLive" style="color:var(--signal)"></div>`; i++; if(i<parts.length) wait(paint,3400); else wait(go,3000); };
       paint();
     }
+    else if(name==='convince'){
+      sc.innerHTML=`<div class="stage">STAGE 03 · CONVINCER</div>
+        <div class="line">Relax your eyelids so completely they simply won't work.<br>When you're certain they won't open — <b>test them</b>. Try, and feel them stay shut.</div>
+        ${btns(`<button class="btn primary" id="stayed">THEY STAYED SHUT →</button><button class="btn ghost" id="opened">they opened</button>`)}`;
+      document.getElementById('stayed').onclick=()=>{ sc.innerHTML=`<div class="stage">STAGE 03 · LOCKED</div><div class="line">Good. That's your mind following instruction.<br>From here, every step takes you deeper.</div>`; wait(go,2800); };
+      document.getElementById('opened').onclick=()=>{ sc.innerHTML=`<div class="stage">STAGE 03 · AGAIN</div><div class="line">Fine — relax them twice as much and let go completely. Deeper is easy.</div>`; wait(go,3000); };
+    }
+    else if(name==='fractionate'){
+      const beats=['Open your eyes… and close. Twice as deep.','Open… and close. Deeper still — sinking.','Once more. Open… close. All the way down now.'];
+      let i=0;
+      const paint=()=>{ sc.innerHTML=`<div class="stage">STAGE 04 · FRACTIONATE · ${i+1}/${beats.length}</div><div class="count" style="font-size:46px">${i+1}</div><div class="line small">${beats[i]}</div>`; i++; if(i<beats.length) wait(paint,3200); else wait(go,2600); };
+      paint();
+    }
+    else if(name==='deepen'){
+      // guaranteed timed descent (10 counts, ~13s); a real measured arousal drop only
+      // ACCELERATES it. Uses wait() timeouts so it can never starve/hang.
+      const start = feeds.live? feeds.arousal : null;
+      const target = start!=null? Math.max(0.05, start-0.10) : null;
+      sc.innerHTML=`<div class="stage">STAGE 05 · DESCEND</div>
+        <div class="count" id="cnt">10</div>
+        <div class="line small" id="dl">${target!=null?'you descend as your body actually drops — faster if you let go':'with every number: wider, clearer, more receptive'}</div>
+        <div class="cyc" id="bioLive" style="color:var(--signal)"></div>`;
+      const cnt=document.getElementById('cnt'), dl=document.getElementById('dl');
+      let n=10;
+      const dn=()=>{
+        cnt.textContent=n;
+        if(target!=null && feeds.live && feeds.arousal<=target){ dl.textContent='you dropped — the intake is wide open'; wait(go,1200); return; }
+        n--;
+        if(n>=1) wait(dn,1300); else { dl.textContent='all the way down'; wait(go,1200); }
+      };
+      wait(dn,400);
+    }
+    else if(name==='imagery'){
+      const reps=['First person: your crosshair is already on the head as they peek. You didn\'t react — you were there.','You feel the fight before it starts. You rotate early and arrive exactly as the pick happens.','Your ult releases the instant it wins the round — the timing is automatic, not decided.','A teammate falls. You\'re already adjusting. Calm. No tilt. Next play.'];
+      let i=0;
+      const paint=()=>{ sc.innerHTML=`<div class="stage">STAGE 06 · REHEARSAL · ${i+1}/${reps.length}</div><div class="line">${reps[i]}</div>${btns(`<button class="btn primary" id="n">${i<reps.length-1?'I SEE IT →':'BURN IT IN →'}</button>`)}`;
+        document.getElementById('n').onclick=()=>{ clearT(); if(i<reps.length-1){i++;paint();} else go(); };
+        if(i<reps.length-1) wait(()=>{i++;paint();},5200); };
+      paint();
+    }
+    else if(name==='payload'){
+      sc.innerHTML=`<div class="stage">STAGE 07 · PAYLOAD</div>
+        <div class="line">The IQ arriving now bonds to you.<br>It does not fade when you surface.<br>It is yours to take home.</div>
+        ${btns(`<button class="btn primary" id="n">IT'S MINE →</button>`)}`;
+      document.getElementById('n').onclick=go; wait(go,6000);
+    }
     else if(name==='anchor'){
-      sc.innerHTML=`<div class="stage">STAGE 05 · ANCHOR LOCK</div>
-        <div class="line">Now fire your anchor and hold it.<br><span style="color:var(--signal)">${S.cfg.anchor}</span></div>
+      sc.innerHTML=`<div class="stage">STAGE 08 · ANCHOR + TEST</div>
+        <div class="line">Fire your anchor and hold.<br><span style="color:var(--signal)">${S.cfg.anchor}</span></div>
         <div class="anchorbar"><div class="anchorfill" id="af"></div></div>
         <div class="line small" id="al">hold…</div>`;
-      const af=document.getElementById('af'), al=document.getElementById('al');
-      let p=0; const iv=setInterval(()=>{ p+=2.2; af.style.width=Math.min(100,p)+'%'; if(p>=100){clearInterval(iv);al.textContent='anchor set — this gesture reopens the intake mid-match';wait(go,1100);} },100);
-      timers.push({/*mark*/}); // ensure clearT stops interval:
-      const origClear=clearT; // not used; interval cleared on complete or END below
-      document.getElementById('indClose')&&(document.getElementById('indClose').onclick=()=>{clearInterval(iv);clearT();host.innerHTML='';});
+      const af=document.getElementById('af'), al=document.getElementById('al'); let p=0;
+      every(()=>{ p+=2.2; af.style.width=Math.min(100,p)+'%'; if(p>=100){ clearT(); al.innerHTML='Release. Now fire it once more — feel the wave come back. <b>That</b> is your mid-match reset.'; wait(go,2800); } },100);
     }
     else if(name==='surface'){
-      sc.innerHTML=`<div class="stage">STAGE 06 · SURFACE WITH IT</div><div class="count" id="cnt">5</div><div class="line small" id="sl">rising — bringing it home</div>`;
-      const lines=['rising','clearer','the IQ is locked','eyes sharpening','back'];
-      let n=5; const cnt=document.getElementById('cnt'), sl=document.getElementById('sl');
-      const dn=()=>{ cnt.textContent=n; sl.textContent=lines[5-n]||'back'; n--; if(n>=1){wait(dn,1000);} else finish(); };
+      const lines=['rising','clearer','the IQ is locked in','eyes sharp','back — and it came with you'];
+      sc.innerHTML=`<div class="stage">STAGE 09 · SURFACE WITH IT</div><div class="count" id="cnt">5</div><div class="line small" id="sl">rising</div>`;
+      const cnt=document.getElementById('cnt'), sl=document.getElementById('sl'); let n=5;
+      const dn=()=>{ cnt.textContent=n; sl.textContent=lines[5-n]||'back'; n--; if(n>=1) wait(dn,1000); else finish(); };
       wait(dn,300);
       function finish(){
         sc.innerHTML=`<div class="stage">◉ INTAKE OPEN</div>
-          <div class="line">Hypnostate primed.<br>IQ intake is widest right now.</div>
-          <div class="line small">Queue immediately. Fire your anchor after every death to top up.</div>
+          <div class="line">Primed. Intake widest right now.</div>
+          <div class="line small">Queue immediately. Fire your anchor after every death to re-enter.</div>
           ${btns(`<button class="btn primary" id="queue">OPEN QUEUE →</button>`)}`;
-        document.getElementById('queue').onclick=async()=>{ S.cfg.primedPending=true; await saveCfg(); clearT(); host.innerHTML=''; toast('◉ PRIMED — GO WIN, THEN LOG IT'); route('console'); };
+        document.getElementById('queue').onclick=async()=>{ S.cfg.primedPending=true; S.cfg.inductions=(S.cfg.inductions||0)+1; await saveCfg(); clearT(); host.innerHTML=''; toast('◉ PRIMED — GO WIN, THEN LOG IT'); route('console'); };
       }
     }
   }
