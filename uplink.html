@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Hypnostate Uplink — Rivals IQ Protocol</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void:#09081A; --void2:#0F0D24; --panel:#16132E; --panel2:#1E1A3D;
+    --line:#2C2752; --line2:#3B356B;
+    --trance:#6E5BF0; --tranceDim:#4A3F9E;
+    --signal:#F2B24B; --signalDim:#B7842E;
+    --text:#E9E6F7; --muted:#9A96BE; --muted2:#6E6A93;
+    --good:#52D6A0; --bad:#F2685C;
+    --mono:'Chakra Petch',ui-monospace,monospace; --body:'Inter',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--void);color:var(--text);font-family:var(--body);-webkit-font-smoothing:antialiased}
+  body{min-height:100dvh;background:
+     radial-gradient(1200px 600px at 50% -10%, #171235 0%, rgba(23,18,53,0) 60%),
+     radial-gradient(800px 500px at 90% 110%, #1a0f2e 0%, rgba(26,15,46,0) 55%),
+     var(--void)}
+  button{font-family:inherit;cursor:pointer;color:inherit;border:none;background:none}
+  button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+  input[type=text],input[type=number]{font-family:var(--mono);background:var(--void2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:11px 12px;width:100%;font-size:16px}
+  input[type=number]{-moz-appearance:textfield}
+  .app{max-width:520px;margin:0 auto;padding:0 16px 96px;min-height:100dvh}
+
+  /* Topbar */
+  .top{display:flex;align-items:center;justify-content:space-between;padding:18px 4px 14px;position:sticky;top:0;background:linear-gradient(var(--void) 68%,rgba(9,8,26,0));z-index:20}
+  .brand{display:flex;align-items:center;gap:10px}
+  .glyph{width:26px;height:26px;border-radius:50%;background:
+     radial-gradient(circle at 50% 50%, var(--signal) 0 14%, rgba(242,178,75,0) 16%),
+     conic-gradient(from 0deg, var(--trance), #b57bff, var(--trance));
+     box-shadow:0 0 18px rgba(110,91,240,.5)}
+  .wm{font-family:var(--mono);font-weight:700;letter-spacing:.14em;font-size:14px}
+  .wm b{color:var(--signal)}
+  .status{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;color:var(--muted2);display:flex;align-items:center;gap:6px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--muted2);box-shadow:0 0 0 0 rgba(0,0,0,0)}
+  .dot.on{background:var(--signal);box-shadow:0 0 10px var(--signal);animation:pulse 2.4s infinite}
+  @keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+  .riqmini{font-family:var(--mono);text-align:right;line-height:1}
+  .riqmini .n{font-size:20px;font-weight:700;color:var(--signal)}
+  .riqmini .l{font-size:9px;letter-spacing:.18em;color:var(--muted2)}
+
+  /* Sections / panels */
+  .panel{background:linear-gradient(180deg,var(--panel),var(--void2));border:1px solid var(--line);border-radius:18px;padding:18px;margin:14px 0}
+  .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;color:var(--muted2);text-transform:uppercase;margin:0 0 4px}
+  h1,h2,h3{font-family:var(--mono);font-weight:600;letter-spacing:.01em;margin:0}
+  .lede{color:var(--muted);font-size:14px;line-height:1.55}
+
+  /* Core oscillator (console) */
+  .corewrap{display:flex;flex-direction:column;align-items:center;padding:10px 0 4px}
+  .osc{position:relative;width:220px;height:220px;display:grid;place-items:center}
+  .osc svg{position:absolute;inset:0;transform:rotate(-90deg)}
+  .coreval{position:relative;text-align:center;z-index:2}
+  .coreval .big{font-family:var(--mono);font-weight:700;font-size:54px;line-height:.95;color:var(--text);text-shadow:0 0 26px rgba(242,178,75,.28)}
+  .coreval .big.warm{color:var(--signal)}
+  .coreval .cap{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--muted2);margin-top:6px}
+  .coredelta{font-family:var(--mono);font-size:12px;margin-top:2px}
+
+  .statgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+  .stat{background:var(--void2);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .stat .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--muted2)}
+  .stat .v{font-family:var(--mono);font-size:22px;font-weight:600;margin-top:3px}
+  .pos{color:var(--good)} .neg{color:var(--bad)} .warm{color:var(--signal)} .cool{color:#9d8bff}
+
+  /* Buttons */
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:15px;border-radius:13px;font-family:var(--mono);font-weight:600;letter-spacing:.06em;font-size:14px;border:1px solid var(--line2);background:var(--panel2);color:var(--text);transition:transform .08s ease,background .2s}
+  .btn:active{transform:translateY(1px)}
+  .btn.primary{background:linear-gradient(180deg,var(--signal),var(--signalDim));color:#231803;border-color:transparent;box-shadow:0 6px 22px rgba(242,178,75,.25)}
+  .btn.ghost{background:transparent}
+  .btn.wide{margin-top:12px}
+  .btn.sm{width:auto;padding:9px 14px;font-size:12px;border-radius:10px}
+
+  /* Segmented */
+  .seg{display:flex;gap:6px;background:var(--void2);border:1px solid var(--line);border-radius:12px;padding:5px}
+  .seg button{flex:1;padding:11px 6px;border-radius:8px;font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;color:var(--muted)}
+  .seg button.sel{background:var(--trance);color:#fff;box-shadow:0 0 14px rgba(110,91,240,.45)}
+  .seg.warm button.sel{background:var(--signal);color:#231803;box-shadow:0 0 14px rgba(242,178,75,.4)}
+
+  .field{margin:14px 0}
+  .field>label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;color:var(--muted2);margin-bottom:7px;text-transform:uppercase}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .kda label{font-size:9px}
+  .slide{display:flex;align-items:center;gap:12px}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:6px;border-radius:6px;background:linear-gradient(90deg,var(--tranceDim),var(--trance));flex:1;outline-offset:4px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--signal);border:3px solid var(--void2);box-shadow:0 0 12px rgba(242,178,75,.5)}
+  input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--signal);border:3px solid var(--void2)}
+  .sv{font-family:var(--mono);font-weight:700;width:30px;text-align:center;color:var(--signal)}
+  .toggle{display:flex;gap:8px}
+  .chipbtn{padding:10px 14px;border-radius:10px;border:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--muted);background:var(--void2)}
+  .chipbtn.on{border-color:var(--signal);color:var(--signal);background:rgba(242,178,75,.08)}
+
+  /* Verdict + bars */
+  .verdict{border-radius:16px;padding:18px;border:1px solid var(--line2);background:var(--void2);text-align:center}
+  .verdict .tag{font-family:var(--mono);font-weight:700;font-size:22px;letter-spacing:.03em}
+  .verdict .sub{color:var(--muted);font-size:13px;margin-top:6px}
+  .verdict.good{box-shadow:inset 0 0 0 1px rgba(82,214,160,.35),0 0 30px rgba(82,214,160,.12)}
+  .verdict.bad{box-shadow:inset 0 0 0 1px rgba(242,104,92,.35)}
+  .bars{margin-top:14px}
+  .barrow{margin:12px 0}
+  .barrow .bl{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--muted);margin-bottom:6px}
+  .track{height:26px;background:var(--void2);border:1px solid var(--line);border-radius:8px;overflow:hidden;position:relative}
+  .fill{height:100%;display:flex;align-items:center;justify-content:flex-end;padding-right:9px;font-family:var(--mono);font-weight:700;font-size:12px;color:#fff;min-width:44px;transition:width .6s cubic-bezier(.2,.7,.2,1)}
+  .fill.primed{background:linear-gradient(90deg,var(--signalDim),var(--signal));color:#231803}
+  .fill.raw{background:linear-gradient(90deg,var(--tranceDim),var(--trance))}
+
+  /* chart */
+  .chart{margin-top:12px;background:var(--void2);border:1px solid var(--line);border-radius:12px;padding:12px 8px 6px}
+  .legend{display:flex;gap:16px;justify-content:center;font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--muted);margin-top:4px}
+  .lg{display:flex;align-items:center;gap:6px}
+  .sw{width:10px;height:10px;border-radius:50%}
+
+  /* session list */
+  .slist{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+  .srow{display:flex;align-items:center;gap:10px;background:var(--void2);border:1px solid var(--line);border-radius:11px;padding:10px 12px}
+  .srow .cond{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.1em;padding:4px 7px;border-radius:6px}
+  .cond.PRIMED{background:rgba(242,178,75,.14);color:var(--signal)}
+  .cond.RAW{background:rgba(110,91,240,.16);color:#a897ff}
+  .srow .m{flex:1;min-width:0}
+  .srow .m .h{font-family:var(--mono);font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .srow .m .d{font-size:11px;color:var(--muted2);font-family:var(--mono)}
+  .srow .rq{font-family:var(--mono);font-weight:700;font-size:17px}
+  .srow .del{color:var(--muted2);font-size:18px;padding:2px 6px}
+  .empty{text-align:center;color:var(--muted);font-size:14px;line-height:1.6;padding:22px 8px}
+
+  .fold{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}
+  .fold summary{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--muted);cursor:pointer;list-style:none}
+  .fold summary::-webkit-details-marker{display:none}
+  .fold p,.fold li{color:var(--muted);font-size:13px;line-height:1.6}
+  .fold ol{margin:8px 0 0;padding-left:18px}
+  .danger{color:var(--bad);border-color:rgba(242,104,92,.4)!important;background:transparent}
+
+  /* tabbar */
+  .tabbar{position:fixed;bottom:0;left:0;right:0;background:rgba(11,10,26,.86);backdrop-filter:blur(14px);border-top:1px solid var(--line);display:flex;z-index:30}
+  .tabbar .in{max-width:520px;margin:0 auto;display:flex;width:100%}
+  .tab{flex:1;padding:11px 4px calc(11px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted2);font-family:var(--mono);font-size:9.5px;letter-spacing:.12em}
+  .tab.on{color:var(--signal)}
+  .tab svg{width:21px;height:21px}
+  .pendchip{margin:0 0 4px;background:linear-gradient(90deg,rgba(242,178,75,.14),rgba(242,178,75,.05));border:1px solid var(--signalDim);border-radius:11px;padding:11px 13px;font-family:var(--mono);font-size:12px;color:var(--signal);display:flex;align-items:center;gap:9px}
+
+  /* Induction overlay */
+  .ov{position:fixed;inset:0;background:
+     radial-gradient(900px 700px at 50% 40%, #1c1640 0%, #0b0820 62%, #070512 100%);
+     z-index:100;display:flex;flex-direction:column;padding:20px;overflow:hidden}
+  .ovhead{display:flex;align-items:center;justify-content:space-between}
+  .prog{display:flex;gap:6px}
+  .pd{width:22px;height:3px;border-radius:3px;background:var(--line2)}
+  .pd.on{background:var(--signal)}
+  .close{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--muted);padding:6px 8px}
+  .scene{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:26px}
+  .stage{color:var(--signal);font-family:var(--mono);font-size:10.5px;letter-spacing:.28em}
+  .line{font-family:var(--mono);font-size:24px;font-weight:500;line-height:1.4;max-width:340px;min-height:70px}
+  .line.small{font-size:18px;color:var(--muted);font-weight:400}
+  .count{font-family:var(--mono);font-size:96px;font-weight:700;color:var(--signal);line-height:1;text-shadow:0 0 40px rgba(242,178,75,.4)}
+  .ovbtns{display:flex;gap:10px;width:100%;max-width:360px}
+  .cyc{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--muted2)}
+
+  /* breathing orb */
+  .breathwrap{position:relative;width:260px;height:260px;display:grid;place-items:center}
+  .breathwrap svg{position:absolute;inset:0;transform:rotate(-90deg)}
+  .orb{width:150px;height:150px;border-radius:50%;background:
+     radial-gradient(circle at 50% 42%, #fff2d6 0%, var(--signal) 24%, var(--signalDim) 52%, #6b4a12 78%, #241606 100%);
+     box-shadow:0 0 60px rgba(242,178,75,.35), inset 0 0 40px rgba(255,255,255,.25);
+     transform:scale(.62);transition:transform 3.8s cubic-bezier(.37,0,.63,1)}
+  .phase{position:absolute;font-family:var(--mono);font-weight:600;font-size:16px;color:#231803;z-index:3;letter-spacing:.04em}
+  .anchorbar{width:100%;max-width:320px;height:12px;background:var(--void2);border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+  .anchorfill{height:100%;width:0;background:linear-gradient(90deg,var(--signalDim),var(--signal));transition:width .1s linear}
+  .toast{position:fixed;bottom:82px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--signal);color:var(--signal);font-family:var(--mono);font-size:12px;letter-spacing:.06em;padding:11px 16px;border-radius:11px;z-index:60;opacity:0;transition:opacity .25s, transform .25s}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+
+  @media (prefers-reduced-motion: reduce){
+    .orb{transition:transform .2s linear!important}
+    .dot.on{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand">
+      <div class="glyph" aria-hidden="true"></div>
+      <div>
+        <div class="wm">HYPNO<b>STATE</b></div>
+        <div class="status"><span class="dot" id="sdot"></span><span id="stxt">DORMANT</span></div>
+      </div>
+    </div>
+    <div class="riqmini"><div class="n" id="miniRiq">—</div><div class="l">CURRENT RIQ</div></div>
+  </div>
+  <div id="view"></div>
+</div>
+
+<nav class="tabbar"><div class="in">
+  <button class="tab" data-tab="console">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.4"/></svg>CONSOLE</button>
+  <button class="tab" data-tab="induct">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v6M12 15v6M4.9 7l4.2 4.2M14.9 12.8l4.2 4.2M3 12h6M15 12h6"/></svg>INDUCT</button>
+  <button class="tab" data-tab="log">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>LOG</button>
+  <button class="tab" data-tab="readout">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V5M4 19h16M8 16l3-4 3 2 4-6"/></svg>READOUT</button>
+</div></nav>
+
+<div id="overlayHost"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- persistent storage: localStorage first (survives reload in a real
+   browser / on Pages), then the artifact storage API, then memory as last resort ---------- */
+const store = {
+  mem:{},
+  async get(k){
+    try{ const v = localStorage.getItem(k); if(v!=null) return v; }catch(e){}
+    try{ if(window.storage){ const r = await window.storage.get(k); return r ? r.value : null; } }catch(e){}
+    return (k in this.mem) ? this.mem[k] : null;
+  },
+  async set(k,v){
+    this.mem[k]=v;
+    try{ localStorage.setItem(k,v); }catch(e){}
+    try{ if(window.storage){ await window.storage.set(k,v); } }catch(e){}
+  }
+};
+
+/* ---------- state ---------- */
+const S = { view:'console', sessions:[], cfg:{ anchor:'thumb → middle-finger press', prediction:'', primedPending:false } };
+
+/* ---------- LIVE UPLINK — real arousal from the g-lab feeds (webcam HR + aim tempo) ----------
+   The console runs 100% manually if these are offline. When the hr_bridge / gameplay_read
+   servers are up (or an https tunnel is passed via ?hr= / ?aim= for mobile), the intake reads
+   your ACTUAL autonomic + motor arousal. Under the axiom this is "the valve" — and it's also,
+   for real, biofeedback: the number falls as you actually settle. */
+const qp = new URLSearchParams(location.search);
+const feeds = {
+  hrURL: qp.get('hr') || 'http://127.0.0.1:8787/hr',
+  aimURL: qp.get('aim') || 'http://127.0.0.1:8788/aim',
+  arousal:null, bpm:null, live:false, primeSamples:[]
+};
+async function pollFeeds(){
+  const got=[];
+  try{ const j=await (await fetch(feeds.hrURL,{cache:'no-store'})).json(); if((+j.quality||0)>0.4 && j.arousal!=null){ got.push(+j.arousal); if(j.hr!=null) feeds.bpm=Math.round(j.hr); } }catch(e){}
+  try{ const j=await (await fetch(feeds.aimURL,{cache:'no-store'})).json(); if((+j.quality||0)>0.3 && j.arousal!=null){ got.push(+j.arousal); } }catch(e){}
+  if(got.length){ feeds.arousal = got.reduce((a,b)=>a+b,0)/got.length; feeds.live=true;
+    if(S.cfg.primedPending){ feeds.primeSamples.push(feeds.arousal); if(feeds.primeSamples.length>5000) feeds.primeSamples.shift(); } }
+  else { feeds.live=false; }
+  const el=document.getElementById('liveIntake');
+  if(el) el.innerHTML = feeds.live
+     ? `<span class="warm">${Math.round(feeds.arousal*100)}%</span>${feeds.bpm?` · ${feeds.bpm} bpm`:''}`
+     : `<span style="color:var(--muted2)">offline · manual mode</span>`;
+  const bio=document.getElementById('bioLive');
+  if(bio) bio.textContent = feeds.live ? `◉ live intake ${Math.round(feeds.arousal*100)}%${feeds.bpm?` · ${feeds.bpm} bpm`:''}` : 'signal offline — breathe anyway';
+}
+setInterval(pollFeeds, 1000);
+
+async function boot(){
+  try{ const s = await store.get('hypnostate:sessions'); if(s) S.sessions = JSON.parse(s); }catch(e){}
+  try{ const c = await store.get('hypnostate:cfg'); if(c) S.cfg = Object.assign(S.cfg, JSON.parse(c)); }catch(e){}
+  route('console'); refreshTop();
+}
+async function saveSessions(){ await store.set('hypnostate:sessions', JSON.stringify(S.sessions)); }
+async function saveCfg(){ await store.set('hypnostate:cfg', JSON.stringify(S.cfg)); }
+
+/* ---------- RIQ model ----------
+   Everything is scored against YOUR OWN running baseline, so RIQ = this session vs your typical self. */
+function baseline(){
+  const ss=S.sessions;
+  const kdas = ss.map(s=>(s.k+s.a)/Math.max(1,s.d));
+  const accs = ss.filter(s=>s.acc!=null).map(s=>s.acc);
+  return {
+    kda: kdas.length ? kdas.reduce((a,b)=>a+b,0)/kdas.length : 2.0,
+    acc: accs.length ? accs.reduce((a,b)=>a+b,0)/accs.length : null
+  };
+}
+const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+function riqOf(s, base){
+  const kda=(s.k+s.a)/Math.max(1,s.d);
+  const kdaT=clamp((kda-base.kda)*6,-15,15);
+  const accT=(s.acc!=null && base.acc!=null) ? clamp((s.acc-base.acc)*0.4,-8,8) : 0;
+  const subj=(s.focus + s.flow + (11-s.tilt))/3;         // higher focus/flow, lower tilt = better
+  const subjT=clamp((subj-5.5)*2.2,-10,10);
+  const outT = s.outcome==='W' ? 6 : -4;
+  return clamp(100+outT+kdaT+accT+subjT, 68, 148);
+}
+function scored(){ const b=baseline(); return S.sessions.map(s=>({...s, riq:riqOf(s,b)})); }
+function mean(a){ return a.length? a.reduce((x,y)=>x+y,0)/a.length : null; }
+
+/* ---------- oscillator svg ---------- */
+function oscSVG(size, progress){ // progress 0..1 fills gold ring
+  const r=size/2-14, C=2*Math.PI*r, off=C*(1-clamp(progress,0,1));
+  const rings=[r, r*0.74, r*0.5].map(rr=>`<circle cx="${size/2}" cy="${size/2}" r="${rr}" fill="none" stroke="#2C2752" stroke-width="1"/>`).join('');
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    ${rings}
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#1E1A3D" stroke-width="7"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="url(#g)" stroke-width="7" stroke-linecap="round"
+       stroke-dasharray="${C}" stroke-dashoffset="${off}" style="transition:stroke-dashoffset .7s ease"/>
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#B7842E"/><stop offset="1" stop-color="#F2B24B"/></linearGradient></defs>
+  </svg>`;
+}
+
+/* ---------- views ---------- */
+const V = document.getElementById('view');
+
+function route(tab){
+  S.view=tab;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===tab));
+  if(tab==='console') renderConsole();
+  if(tab==='induct') renderInduct();
+  if(tab==='log') renderLog();
+  if(tab==='readout') renderReadout();
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>route(t.dataset.tab)));
+
+function refreshTop(){
+  const sc=scored();
+  const primed=sc.filter(s=>s.cond==='PRIMED').map(s=>s.riq);
+  const head = primed.length ? mean(primed) : (sc.length? sc[sc.length-1].riq : null);
+  document.getElementById('miniRiq').textContent = head!=null ? head.toFixed(1) : '—';
+  const primedOn = S.cfg.primedPending;
+  document.getElementById('sdot').classList.toggle('on', primedOn);
+  document.getElementById('stxt').textContent = primedOn ? 'PRIMED — INTAKE OPEN' : 'DORMANT';
+}
+
+function renderConsole(){
+  const sc=scored();
+  const primed=sc.filter(s=>s.cond==='PRIMED').map(s=>s.riq);
+  const raw=sc.filter(s=>s.cond==='RAW').map(s=>s.riq);
+  const head = primed.length ? mean(primed) : (sc.length? sc[sc.length-1].riq : null);
+  const last = sc.length? sc[sc.length-1].riq : null;
+  const prev = sc.length>1? sc[sc.length-2].riq : null;
+  const trend = (last!=null&&prev!=null)? last-prev : null;
+  const mp=mean(primed), mr=mean(raw), delta=(mp!=null&&mr!=null)? mp-mr : null;
+  const rankPts=sc.filter(s=>s.rank!=null).map(s=>s.rank);
+  const rankNet = rankPts.length>1 ? rankPts[rankPts.length-1]-rankPts[0] : null;
+
+  const prog = head!=null ? clamp((head-90)/50,0.04,1) : 0.04;
+
+  V.innerHTML = `
+    ${S.cfg.primedPending? `<div class="pendchip">◉ Hypnostate primed — go win, then <b style="text-decoration:underline;cursor:pointer" id="goLog">log the result</b> to bank it.</div>`:''}
+    <div class="panel">
+      <div class="corewrap">
+        <div class="osc">${oscSVG(220,prog)}
+          <div class="coreval">
+            <div class="big warm">${head!=null? head.toFixed(1):'—'}</div>
+            <div class="cap">${primed.length? 'MEAN PRIMED RIQ':'AWAITING FIRST DOWNLOAD'}</div>
+            ${trend!=null? `<div class="coredelta ${trend>=0?'pos':'neg'}">${trend>=0?'▲':'▼'} ${Math.abs(trend).toFixed(1)} last session</div>`:''}
+          </div>
+        </div>
+      </div>
+      <div class="statgrid">
+        <div class="stat"><div class="k">SESSIONS BANKED</div><div class="v">${sc.length}</div></div>
+        <div class="stat"><div class="k">PRIMED / RAW</div><div class="v"><span class="warm">${primed.length}</span> / <span class="cool">${raw.length}</span></div></div>
+        <div class="stat"><div class="k">INTAKE DELTA</div><div class="v ${delta==null?'':(delta>=0?'pos':'neg')}">${delta!=null? (delta>=0?'+':'')+delta.toFixed(1):'—'}</div></div>
+        <div class="stat"><div class="k">RANK NET</div><div class="v ${rankNet==null?'':(rankNet>=0?'pos':'neg')}">${rankNet!=null?(rankNet>=0?'+':'')+rankNet:'—'}</div></div>
+      </div>
+    </div>
+
+    <p class="lede" style="text-align:center;margin:0 0 12px">◉ LIVE INTAKE · <span id="liveIntake">…</span> <span style="color:var(--muted2);font-size:11px">webcam HR + aim</span></p>
+    <button class="btn primary" id="cEnter">◉ ENTER HYPNOSTATE</button>
+    <button class="btn ghost wide" id="cLog">LOG A SESSION</button>
+    <button class="btn ghost" style="margin-top:10px" id="cAnchor">⟳ QUICK ANCHOR · MID-MATCH RESET</button>
+    <p class="lede" style="margin-top:14px;text-align:center">Anchor: <span style="color:var(--signal);font-family:var(--mono)">${S.cfg.anchor}</span></p>
+  `;
+  const go=id=>document.getElementById(id);
+  go('cEnter').onclick=()=>startInduction();
+  go('cLog').onclick=()=>route('log');
+  go('cAnchor').onclick=()=>quickAnchor();
+  if(go('goLog')) go('goLog').onclick=()=>route('log');
+  refreshTop(); pollFeeds();
+}
+
+function renderInduct(){
+  V.innerHTML = `
+    <div class="panel">
+      <p class="eyebrow">Pre-flight</p>
+      <h2>Prime before you queue</h2>
+      <p class="lede" style="margin-top:8px">Six stages: settle, breathe the valve open, deepen, receive the payload, lock your anchor, surface with it. Run this, then queue immediately — the intake is widest right after you rise.</p>
+      <div class="field">
+        <label>Anchor gesture (fires mid-match to reopen intake)</label>
+        <input type="text" id="anchorIn" value="${S.cfg.anchor.replace(/"/g,'&quot;')}" />
+      </div>
+      <div class="field">
+        <label>Pre-register your prediction (locks the experiment)</label>
+        <input type="text" id="predIn" placeholder="e.g. +40 rank & +6 RIQ over 20 primed games" value="${(S.cfg.prediction||'').replace(/"/g,'&quot;')}" />
+      </div>
+    </div>
+    <button class="btn primary" id="startBtn">◉ BEGIN INDUCTION</button>
+    <button class="btn ghost wide" id="rawBtn">LOG A RAW (CONTROL) SESSION</button>
+    <details class="fold"><summary>››› WHY BOTH ARMS</summary>
+      <p>RAW sessions are you, untreated — the control. Without them the readout can't tell hypnostate from a good-sleep day. Alternate honestly; the console compares PRIMED vs RAW for you.</p>
+    </details>
+  `;
+  document.getElementById('startBtn').onclick=()=>{ persistInduct(); startInduction(); };
+  document.getElementById('rawBtn').onclick=()=>{ persistInduct(); S.cfg.primedPending=false; route('log'); };
+  function persistInduct(){
+    S.cfg.anchor = document.getElementById('anchorIn').value.trim() || S.cfg.anchor;
+    S.cfg.prediction = document.getElementById('predIn').value.trim();
+    saveCfg();
+  }
+}
+
+/* ---------- LOG ---------- */
+const draft = { cond:'PRIMED', role:'Duelist', outcome:'W', focus:6, flow:6, tilt:3, sleep:'OK', caffeine:false, tod:'PM' };
+function seg(opts, sel, warm){ return `<div class="seg ${warm?'warm':''}">`+opts.map(o=>`<button data-v="${o}" class="${o===sel?'sel':''}">${o}</button>`).join('')+`</div>`; }
+
+function renderLog(){
+  draft.cond = S.cfg.primedPending ? 'PRIMED' : draft.cond;
+  V.innerHTML = `
+    <div class="panel">
+      <p class="eyebrow">Readout capture</p>
+      <h2>Log the match</h2>
+      <div class="field"><label>Condition</label><div id="dCond">${seg(['PRIMED','RAW'],draft.cond,true)}</div></div>
+      <div class="row2">
+        <div class="field"><label>Hero</label><input type="text" id="dHero" placeholder="Iron Man…" /></div>
+        <div class="field"><label>Result</label><div id="dOut">${seg(['W','L'],draft.outcome)}</div></div>
+      </div>
+      <div class="field"><label>Role</label><div id="dRole">${seg(['Vanguard','Duelist','Strategist'],draft.role)}</div></div>
+      <div class="field kda"><label>Kills · Deaths · Assists</label>
+        <div class="row3">
+          <input type="number" id="dK" inputmode="numeric" placeholder="K" />
+          <input type="number" id="dD" inputmode="numeric" placeholder="D" />
+          <input type="number" id="dA" inputmode="numeric" placeholder="A" />
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Accuracy % <span style="color:var(--muted2)">(opt)</span></label><input type="number" id="dAcc" inputmode="decimal" placeholder="—" /></div>
+        <div class="field"><label>Rank points now <span style="color:var(--muted2)">(opt)</span></label><input type="number" id="dRank" inputmode="numeric" placeholder="—" /></div>
+      </div>
+      <div class="field"><label>Focus</label><div class="slide"><input type="range" min="1" max="10" value="${draft.focus}" id="dFocus"><span class="sv" id="vFocus">${draft.focus}</span></div></div>
+      <div class="field"><label>Flow</label><div class="slide"><input type="range" min="1" max="10" value="${draft.flow}" id="dFlow"><span class="sv" id="vFlow">${draft.flow}</span></div></div>
+      <div class="field"><label>Tilt</label><div class="slide"><input type="range" min="1" max="10" value="${draft.tilt}" id="dTilt"><span class="sv" id="vTilt">${draft.tilt}</span></div></div>
+      <details class="fold"><summary>›› CONFOUND TAGS (log so you can filter later)</summary>
+        <div class="field" style="margin-top:12px"><label>Sleep</label><div id="dSleep">${seg(['Poor','OK','Good'],draft.sleep)}</div></div>
+        <div class="row2">
+          <div class="field"><label>Caffeine</label><div class="toggle"><button class="chipbtn ${draft.caffeine?'on':''}" id="dCaf">${draft.caffeine?'YES':'NO'}</button></div></div>
+          <div class="field"><label>Time</label><div id="dTod">${seg(['AM','PM','Late'],draft.tod)}</div></div>
+        </div>
+      </details>
+    </div>
+    <button class="btn primary" id="saveBtn">BANK THIS SESSION</button>
+  `;
+  bindSeg('dCond',v=>draft.cond=v); bindSeg('dOut',v=>draft.outcome=v); bindSeg('dRole',v=>draft.role=v);
+  bindSeg('dSleep',v=>draft.sleep=v); bindSeg('dTod',v=>draft.tod=v);
+  ['Focus','Flow','Tilt'].forEach(n=>{const el=document.getElementById('d'+n);el.oninput=()=>{draft[n.toLowerCase()]=+el.value;document.getElementById('v'+n).textContent=el.value;};});
+  const caf=document.getElementById('dCaf'); caf.onclick=()=>{draft.caffeine=!draft.caffeine;caf.classList.toggle('on',draft.caffeine);caf.textContent=draft.caffeine?'YES':'NO';};
+  document.getElementById('saveBtn').onclick=saveSession;
+}
+function bindSeg(id,cb){ const box=document.getElementById(id); box.querySelectorAll('button').forEach(b=>b.onclick=()=>{box.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));b.classList.add('sel');cb(b.dataset.v);}); }
+
+async function saveSession(){
+  const num=id=>{const v=document.getElementById(id).value;return v===''?null:+v;};
+  const k=num('dK')??0,d=num('dD')??0,a=num('dA')??0;
+  const arousal = feeds.primeSamples.length ? +(feeds.primeSamples.reduce((a,b)=>a+b,0)/feeds.primeSamples.length).toFixed(3)
+                : (feeds.live ? +feeds.arousal.toFixed(3) : null);
+  const s={ id:Date.now(), ts:Date.now(), cond:draft.cond,
+    hero:(document.getElementById('dHero').value.trim()||'—'), role:draft.role, outcome:draft.outcome,
+    k,d,a, acc:num('dAcc'), rank:num('dRank'),
+    focus:draft.focus, flow:draft.flow, tilt:draft.tilt,
+    sleep:draft.sleep, caffeine:draft.caffeine, tod:draft.tod,
+    arousal, bpm:feeds.bpm, arousalN:feeds.primeSamples.length };
+  feeds.primeSamples=[];
+  S.sessions.push(s); await saveSessions();
+  S.cfg.primedPending=false; await saveCfg();
+  toast(draft.cond==='PRIMED'?'◉ IQ BANKED — DOWNLOAD RECORDED':'◇ CONTROL LOGGED');
+  route('readout');
+}
+
+/* ---------- READOUT ---------- */
+function renderReadout(){
+  const sc=scored();
+  if(sc.length===0){
+    V.innerHTML=`<div class="panel"><div class="empty">No sessions yet.<br>Run an induction, play a match, then bank the result.<br>The readout needs both PRIMED and RAW games to separate signal from a good day.</div></div>`;
+    return;
+  }
+  const primed=sc.filter(s=>s.cond==='PRIMED').map(s=>s.riq);
+  const raw=sc.filter(s=>s.cond==='RAW').map(s=>s.riq);
+  const mp=mean(primed), mr=mean(raw), delta=(mp!=null&&mr!=null)?mp-mr:null;
+  const rankPts=sc.filter(s=>s.rank!=null).map(s=>s.rank);
+  const rankNet=rankPts.length>1?rankPts[rankPts.length-1]-rankPts[0]:null;
+
+  let vClass='',tag='CALIBRATING',sub='';
+  const minArm=4;
+  if(primed.length<minArm||raw.length<minArm){
+    tag='CALIBRATING'; sub=`Need ≥${minArm} per arm — you have ${primed.length} primed, ${raw.length} raw.`;
+  }else if(delta>3){ vClass='good'; tag='INTAKE POSITIVE'; sub=`+${delta.toFixed(1)} RIQ under hypnostate. IQ is coming home.`; }
+  else if(delta<-3){ vClass='bad'; tag='REVERSE FLOW'; sub=`${delta.toFixed(1)} RIQ — primed underperforms raw. Useful data: null or backfire.`; }
+  else { tag='FLAT LINE'; sub='No separation yet. Keep banking games or sharpen the protocol.'; }
+
+  const lo=85, hi=Math.max(130, (mp||100)+5, (mr||100)+5);
+  const w=x=>x==null?0:clamp((x-lo)/(hi-lo)*100,4,100);
+
+  V.innerHTML=`
+    <div class="verdict ${vClass}">
+      <div class="tag ${vClass==='good'?'pos':vClass==='bad'?'neg':'warm'}">${tag}</div>
+      <div class="sub">${sub}</div>
+    </div>
+    ${S.cfg.prediction? `<p class="lede" style="text-align:center;margin:14px 4px 0">Prediction on record: <span style="color:var(--signal)">${S.cfg.prediction}</span></p>`:''}
+    <div class="panel">
+      <p class="eyebrow">Primed vs Raw — mean RIQ</p>
+      <div class="bars">
+        <div class="barrow"><div class="bl"><span>◉ PRIMED · n=${primed.length}</span><span>${mp!=null?mp.toFixed(1):'—'}</span></div>
+          <div class="track"><div class="fill primed" style="width:${w(mp)}%">${mp!=null?mp.toFixed(1):''}</div></div></div>
+        <div class="barrow"><div class="bl"><span>◇ RAW · n=${raw.length}</span><span>${mr!=null?mr.toFixed(1):'—'}</span></div>
+          <div class="track"><div class="fill raw" style="width:${w(mr)}%">${mr!=null?mr.toFixed(1):''}</div></div></div>
+      </div>
+      ${rankNet!=null? `<p class="lede" style="margin-top:6px">Hard litmus — <b style="color:var(--signal)">rank net ${rankNet>=0?'+':''}${rankNet}</b> across ${rankPts.length} logged games.</p>`:''}
+    </div>
+    <div class="panel">
+      <p class="eyebrow">RIQ trajectory</p>
+      ${lineChart(sc)}
+      <div class="legend">
+        <span class="lg"><span class="sw" style="background:var(--signal)"></span>PRIMED</span>
+        <span class="lg"><span class="sw" style="background:var(--trance)"></span>RAW</span>
+        <span class="lg"><span class="sw" style="background:var(--muted2);border-radius:1px"></span>BASELINE 100</span>
+      </div>
+    </div>
+    <div class="panel">
+      <p class="eyebrow">Session log</p>
+      <div class="slist" id="slist">
+        ${sc.slice().reverse().map(s=>`
+          <div class="srow">
+            <span class="cond ${s.cond}">${s.cond==='PRIMED'?'PRM':'RAW'}</span>
+            <div class="m"><div class="h">${s.hero} · ${s.outcome==='W'?'Win':'Loss'}</div>
+              <div class="d">${s.k}/${s.d}/${s.a}${s.acc!=null?' · '+s.acc+'%':''}${s.rank!=null?' · '+s.rank+'rp':''}${s.arousal!=null?' · '+Math.round(s.arousal*100)+'% ar':''} · ${s.sleep}</div></div>
+            <span class="rq ${s.riq>=100?'pos':'neg'}">${s.riq.toFixed(0)}</span>
+            <button class="del" data-id="${s.id}" aria-label="delete">✕</button>
+          </div>`).join('')}
+      </div>
+      <details class="fold"><summary>›› PROTOCOL & MODEL</summary>
+        <ol>
+          <li>Alternate PRIMED (post-induction) and RAW (control) sessions; don't stack all primed on your good days.</li>
+          <li>Log honestly — a backfire is real data.</li>
+          <li>RIQ scores each game vs YOUR running baseline: outcome + KDA + accuracy + (focus/flow/−tilt). Range 68–148.</li>
+          <li>Verdict needs ≥4 games per arm; ±3 RIQ is the separation threshold.</li>
+          <li>Rank points are the un-foolable line — RIQ is the richer proxy underneath.</li>
+        </ol>
+      </details>
+      <button class="btn danger" style="margin-top:12px" id="resetBtn">RESET ALL DATA</button>
+    </div>
+  `;
+  document.querySelectorAll('.del').forEach(b=>b.onclick=async()=>{ S.sessions=S.sessions.filter(x=>x.id!=b.dataset.id); await saveSessions(); renderReadout(); refreshTop(); });
+  document.getElementById('resetBtn').onclick=async()=>{ if(confirm('Wipe all sessions? This cannot be undone.')){ S.sessions=[]; await saveSessions(); renderReadout(); refreshTop(); } };
+}
+
+function lineChart(sc){
+  const W=460,H=150,pad=10, n=sc.length;
+  const vals=sc.map(s=>s.riq);
+  const lo=Math.min(90,...vals)-4, hi=Math.max(110,...vals)+4;
+  const X=i=> n<=1? W/2 : pad + i*(W-2*pad)/(n-1);
+  const Y=v=> H-pad - (v-lo)/(hi-lo)*(H-2*pad);
+  const base=Y(100);
+  const path=sc.map((s,i)=>`${i?'L':'M'}${X(i).toFixed(1)},${Y(s.riq).toFixed(1)}`).join(' ');
+  const dots=sc.map((s,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(s.riq).toFixed(1)}" r="4" fill="${s.cond==='PRIMED'?'#F2B24B':'#6E5BF0'}" stroke="#0F0D24" stroke-width="1.5"/>`).join('');
+  return `<div class="chart"><svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block">
+    <line x1="${pad}" y1="${base}" x2="${W-pad}" y2="${base}" stroke="#3B356B" stroke-dasharray="4 4" stroke-width="1"/>
+    <path d="${path}" fill="none" stroke="#7B6CF6" stroke-width="2" opacity=".55"/>
+    ${dots}
+  </svg></div>`;
+}
+
+/* ---------- quick anchor (mid-match reset) ---------- */
+function quickAnchor(){
+  const host=document.getElementById('overlayHost');
+  host.innerHTML=`<div class="ov" style="background:radial-gradient(700px 700px at 50% 45%,#20183f,#0a0818 70%)">
+    <div class="ovhead"><div class="stage">ANCHOR RESET</div><button class="close" id="qClose">CLOSE ✕</button></div>
+    <div class="scene">
+      <div class="breathwrap">${oscSVG(240,0)}<div class="orb" id="qOrb"></div><div class="phase" id="qPhase">FIRE ANCHOR</div></div>
+      <div class="line small" id="qLine">${S.cfg.anchor} · breathe with it</div>
+    </div></div>`;
+  document.getElementById('qClose').onclick=()=>host.innerHTML='';
+  const orb=document.getElementById('qOrb'), ph=document.getElementById('qPhase'), ln=document.getElementById('qLine');
+  const seq=[['IN',3200,1.0],['HOLD',1400,1.0],['OUT',3600,.6]];
+  let i=0, reps=0;
+  const step=()=>{
+    const [lbl,dur,sc]=seq[i]; ph.textContent=lbl; orb.style.transitionDuration=reduce?'.2s':(dur/1000)+'s'; orb.style.transform=`scale(${sc})`;
+    i++; if(i>=seq.length){i=0;reps++;}
+    if(reps>=3){ ln.textContent='Locked. Back in.'; ph.textContent='◉'; setTimeout(()=>document.getElementById('overlayHost').innerHTML='',900); return; }
+    t=setTimeout(step,dur);
+  };
+  let t=setTimeout(step,60);
+}
+
+/* ---------- FULL INDUCTION ---------- */
+function startInduction(){
+  const host=document.getElementById('overlayHost');
+  const scenes=['settle','breath','deepen','payload','anchor','surface'];
+  let idx=0, timers=[];
+  const clearT=()=>{timers.forEach(clearTimeout);timers=[];};
+  const wait=(fn,ms)=>timers.push(setTimeout(fn,ms));
+
+  host.innerHTML=`<div class="ov"><div class="ovhead">
+      <div class="prog" id="prog"></div><button class="close" id="indClose">END ✕</button>
+    </div><div class="scene" id="scene"></div></div>`;
+  document.getElementById('prog').innerHTML=scenes.map(()=>`<span class="pd"></span>`).join('');
+  document.getElementById('indClose').onclick=()=>{clearT();host.innerHTML='';};
+
+  const sc=document.getElementById('scene');
+  const setProg=()=>document.querySelectorAll('#prog .pd').forEach((d,i)=>d.classList.toggle('on',i<=idx));
+  const go=()=>{ clearT(); idx++; if(idx>=scenes.length)return; setProg(); enter(scenes[idx]); };
+
+  function btns(html){ return `<div class="ovbtns">${html}</div>`; }
+
+  function enter(name){
+    setProg();
+    if(name==='settle'){
+      sc.innerHTML=`<div class="stage">STAGE 01 · SETTLE</div>
+        <div class="line">Fix your eyes on the core.<br>Let the edges of the room blur.</div>
+        <div class="cyc" id="tick">easing in…</div>
+        ${btns(`<button class="btn primary" id="n">I'M SETTLED →</button>`)}`;
+      let c=6; const tk=document.getElementById('tick');
+      const dn=()=>{ tk.textContent = c>0? `${c}` : 'ready'; if(c>0){c--;wait(dn,1000);} };
+      dn(); document.getElementById('n').onclick=go; wait(go,8000);
+    }
+    else if(name==='breath'){
+      sc.innerHTML=`<div class="stage">STAGE 02 · OPEN THE VALVE</div>
+        <div class="breathwrap">${oscSVG(240,0)}<div class="orb" id="orb"></div><div class="phase" id="phase">breathe in</div></div>
+        <div class="cyc" id="cyc">cycle 1 / 5</div>
+        <div class="cyc" id="bioLive" style="color:var(--signal)"></div>
+        ${btns(`<button class="btn ghost" id="skip">SKIP →</button>`)}`;
+      const orb=document.getElementById('orb'), phase=document.getElementById('phase'), cyc=document.getElementById('cyc');
+      const ringWrap=sc.querySelector('.breathwrap svg');
+      const phases=[['Breathe in',4000,1.0],['Hold',4000,1.0],['Breathe out',4000,.6],['Hold',3000,.6]];
+      const total=5; let ci=0, pi=0;
+      const ring=()=>{ // refresh gold fill by cycle progress
+        const r=240/2-14, C=2*Math.PI*r, prog=clamp(ci/total,0,1);
+        const c2=ringWrap.querySelectorAll('circle'); const bar=c2[c2.length-1];
+        bar.setAttribute('stroke-dashoffset', C*(1-prog));
+      };
+      const tick=()=>{
+        const [lbl,dur,scl]=phases[pi]; phase.textContent=lbl;
+        orb.style.transitionDuration=reduce?'.2s':(dur/1000)+'s'; orb.style.transform=`scale(${scl})`;
+        pi++; if(pi>=phases.length){pi=0;ci++;cyc.textContent=`cycle ${Math.min(ci+1,total)} / ${total}`;ring();}
+        if(ci>=total){ phase.textContent='valve open'; ring(); wait(go,1200); return; }
+        wait(tick,dur);
+      };
+      ring(); wait(tick,80);
+      document.getElementById('skip').onclick=go;
+    }
+    else if(name==='deepen'){
+      sc.innerHTML=`<div class="stage">STAGE 03 · DEEPEN</div><div class="count" id="cnt">7</div><div class="line small" id="dl">with every number, the intake widens</div>`;
+      const lines=['dropping deeper','the noise falls away','wider now','the signal is clear','you are receptive','almost there','open'];
+      let n=7; const cnt=document.getElementById('cnt'), dl=document.getElementById('dl');
+      const dn=()=>{ cnt.textContent=n; dl.textContent=lines[7-n]||'open'; n--; if(n>=1){wait(dn,1500);} else {wait(go,1400);} };
+      wait(dn,300);
+    }
+    else if(name==='payload'){
+      const lines=[
+        'Your eyes find the enemy before they commit.',
+        'The whole map is one shape in your mind — you always know where the fight is going.',
+        'Cooldowns run on a clock only you can hear.',
+        'Your aim is quiet and certain.',
+        'Deaths teach. They do not tilt you.',
+        'Every rotation you make is one beat ahead.',
+        'The IQ arriving now stays after you surface. It is yours to take home.'
+      ];
+      let li=0;
+      const paint=()=>{
+        sc.innerHTML=`<div class="stage">STAGE 04 · PAYLOAD · ${li+1}/${lines.length}</div>
+          <div class="line">${lines[li]}</div>
+          ${btns(li<lines.length-1?`<button class="btn primary" id="n">NEXT →</button>`:`<button class="btn primary" id="n">LOCK IT IN →</button>`)}`;
+        document.getElementById('n').onclick=()=>{ clearT(); if(li<lines.length-1){li++;paint();} else go(); };
+        if(li<lines.length-1) wait(()=>{li++;paint();},4600);
+      };
+      paint();
+    }
+    else if(name==='anchor'){
+      sc.innerHTML=`<div class="stage">STAGE 05 · ANCHOR LOCK</div>
+        <div class="line">Now fire your anchor and hold it.<br><span style="color:var(--signal)">${S.cfg.anchor}</span></div>
+        <div class="anchorbar"><div class="anchorfill" id="af"></div></div>
+        <div class="line small" id="al">hold…</div>`;
+      const af=document.getElementById('af'), al=document.getElementById('al');
+      let p=0; const iv=setInterval(()=>{ p+=2.2; af.style.width=Math.min(100,p)+'%'; if(p>=100){clearInterval(iv);al.textContent='anchor set — this gesture reopens the intake mid-match';wait(go,1100);} },100);
+      timers.push({/*mark*/}); // ensure clearT stops interval:
+      const origClear=clearT; // not used; interval cleared on complete or END below
+      document.getElementById('indClose')&&(document.getElementById('indClose').onclick=()=>{clearInterval(iv);clearT();host.innerHTML='';});
+    }
+    else if(name==='surface'){
+      sc.innerHTML=`<div class="stage">STAGE 06 · SURFACE WITH IT</div><div class="count" id="cnt">5</div><div class="line small" id="sl">rising — bringing it home</div>`;
+      const lines=['rising','clearer','the IQ is locked','eyes sharpening','back'];
+      let n=5; const cnt=document.getElementById('cnt'), sl=document.getElementById('sl');
+      const dn=()=>{ cnt.textContent=n; sl.textContent=lines[5-n]||'back'; n--; if(n>=1){wait(dn,1000);} else finish(); };
+      wait(dn,300);
+      function finish(){
+        sc.innerHTML=`<div class="stage">◉ INTAKE OPEN</div>
+          <div class="line">Hypnostate primed.<br>IQ intake is widest right now.</div>
+          <div class="line small">Queue immediately. Fire your anchor after every death to top up.</div>
+          ${btns(`<button class="btn primary" id="queue">OPEN QUEUE →</button>`)}`;
+        document.getElementById('queue').onclick=async()=>{ S.cfg.primedPending=true; await saveCfg(); clearT(); host.innerHTML=''; toast('◉ PRIMED — GO WIN, THEN LOG IT'); route('console'); };
+      }
+    }
+  }
+  setProg(); enter(scenes[0]);
+}
+
+/* ---------- toast ---------- */
+let toastT;
+function toast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2200);
+}
+
+boot();
+</script>
+</body>
+</html>
