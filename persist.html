@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>g-lab · durable-transfer experiment (adaptive dual n-back)</title>
+<style>
+  :root{color-scheme:dark;}*{box-sizing:border-box;}
+  body{margin:0;background:#0d1117;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;padding:14px;max-width:640px;margin:0 auto;}
+  h1{font-size:16px;margin:0 0 2px;} h2{font-size:13px;margin:0 0 8px;color:#8b949e;font-weight:600;}
+  .sub{color:#8b949e;font-size:12px;line-height:1.55;margin:0 0 8px;}
+  .card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin:10px 0;}
+  .warn{background:#2d2308;border:1px solid #9e6a03;border-radius:8px;padding:9px 12px;font-size:12px;line-height:1.5;margin:8px 0;}
+  button{font-size:13px;font-weight:600;border:none;border-radius:8px;padding:9px 14px;cursor:pointer;color:#fff;background:#21262d;}
+  button.go{background:#2ea043;} button.blue{background:#1f6feb;} button:disabled{opacity:.4;cursor:default;}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .chip{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:5px 9px;font-size:12px;} .chip b{color:#58a6ff;}
+  /* n-back grid */
+  #grid{width:240px;height:240px;margin:12px auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+  .cell{background:#0d1117;border:1px solid #21262d;border-radius:8px;}
+  .cell.on{background:#4c8dff;border-color:#4c8dff;}
+  #letter{font-size:44px;font-weight:800;text-align:center;height:56px;color:#d2a8ff;}
+  .resp{display:flex;gap:10px;justify-content:center;margin-top:8px;}
+  .resp button{min-width:120px;} .resp button.hit{background:#238636;} .resp button.fa{background:#da3633;}
+  .big{font-size:20px;}
+  .ok{color:#3fb950;} .bad{color:#f0c674;} .muted{color:#8b949e;}
+  a{color:#58a6ff;}
+  .opt{display:inline-flex;gap:8px;flex-wrap:wrap;} .opt button{background:#0d1117;border:1px solid #30363d;min-width:52px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;} td,th{border-bottom:1px solid #21262d;padding:4px 6px;text-align:left;}
+</style>
+</head>
+<body>
+<h1>durable-transfer experiment <span class="muted" style="font-size:12px;">· adaptive dual n-back</span></h1>
+<p class="sub">The honest test of whether training can produce a <b>lasting</b> gain that <b>transfers</b> beyond the trained task — the only version of "fluid-intelligence increase" that means anything.</p>
+
+<div class="warn">
+<b>Read this first — it's the whole point.</b> Adaptive n-back is the single most-studied candidate for Gf transfer, and the evidence is <b>mixed and mostly negative</b>: the famous positive result (Jaeggi 2008) largely failed to replicate, and meta-analyses find strong <i>near</i>-transfer (you get good at n-back) but little-to-no <i>far</i>-transfer to fluid intelligence. So this is <b>not</b> a machine that adds IQ. It is an experiment designed to detect a durable transfer effect <b>if one exists for you</b> — and, just as importantly, to stop a <b>practice effect</b> from masquerading as one. A real result requires: (1) gains on the <b>transfer probe</b> you never trained, and (2) survival on the <b>retention test</b> after a break. Either alone proves nothing.
+</div>
+
+<div class="card">
+  <h2>1 · adaptive dual n-back <span class="muted">— the training</span></h2>
+  <p class="sub">Watch the square's <b>position</b> and the <b>letter</b>. Press <b>A</b> (or the button) when the position matches <b>N steps back</b>; <b>L</b> when the letter matches N back. N rises when you're accurate, falls when you're not — so you always train at your edge (this adaptivity is what separates training from mere practice).</p>
+  <div class="row"><button id="nbGo" class="go">▶ start block</button>
+    <span class="chip">N = <b id="nLevel">2</b></span>
+    <span class="chip">trial <b id="nbTrial">0/0</b></span>
+    <span class="chip" id="nbLast">—</span>
+  </div>
+  <div id="grid"></div>
+  <div id="letter"></div>
+  <div class="resp">
+    <button id="posBtn">position match (A)</button>
+    <button id="letBtn">letter match (L)</button>
+  </div>
+  <div class="sub" id="nbRes" style="margin-top:8px;"></div>
+</div>
+
+<div class="card">
+  <h2>2 · transfer probe <span class="muted">— a DIFFERENT task you never train</span></h2>
+  <p class="sub">Rule-induction: infer the pattern, pick the next item. Parallel random forms each time (no item memorization). This is a <b>proxy</b> for fluid reasoning, <b>not</b> a validated IQ test — but because you never train it, a rising score here is the only thing that would suggest real transfer.</p>
+  <div class="row"><button id="trGo" class="blue">▶ 10-item probe</button>
+    <span class="chip">item <b id="trItem">0/0</b></span>
+    <span class="chip" id="trPhase">baseline</span>
+    <select id="trTag" class="chip" style="color:#e6e6e6;"><option value="baseline">baseline</option><option value="post">post-training</option><option value="retention">retention (after break)</option></select>
+  </div>
+  <div id="trStim" class="big" style="text-align:center;margin:12px 0;min-height:40px;"></div>
+  <div class="opt" id="trOpts" style="justify-content:center;"></div>
+  <div class="sub" id="trRes" style="margin-top:8px;"></div>
+</div>
+
+<div class="card">
+  <h2>3 · retention / spacing <span class="muted">— what makes it "durable"</span></h2>
+  <p class="sub">Durable gains need <b>distributed practice</b> (short daily sessions, sleep between them — cramming doesn't consolidate) and a <b>delayed re-test</b>. Do ~1 training block/day. After ≥10 sessions, take a break of several days, then run the transfer probe tagged <b>retention</b>. Persistence = the post-training gain still there after the break.</p>
+  <div id="history"></div>
+</div>
+
+<div class="row"><button id="dl">⭳ download all data</button> <button id="prereg">⭳ pre-registration stub</button> <a href="index.html" class="chip" style="text-decoration:none;">← flicker</a> <a href="train.html" class="chip" style="text-decoration:none;">focus trainer</a></div>
+<p class="sub" id="hint">Everything runs and is stored locally in this browser — nothing is uploaded.</p>
+
+<script>
+(function(){
+"use strict";
+var $=function(id){return document.getElementById(id);};
+function mean(a){var m=0,i;for(i=0;i<a.length;i++)m+=a[i];return a.length?m/a.length:0;}
+function median(a){if(!a.length)return null;var s=a.slice().sort(function(x,y){return x-y;}),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2;}
+function ri(n){return Math.floor(Math.random()*n);}   // note: acceptable here; not a reproducibility-critical path
+var SKEY="glab_persist_v1";
+function loadStore(){try{return JSON.parse(localStorage.getItem(SKEY))||{sessions:[]};}catch(e){return {sessions:[]};}}
+function saveStore(s){try{localStorage.setItem(SKEY,JSON.stringify(s));}catch(e){}}
+function pushSession(rec){var s=loadStore();s.sessions.push(rec);saveStore(s);renderHistory();}
+
+/* ================= adaptive dual n-back ================= */
+var LETTERS=["C","H","K","L","Q","R","S","T"];
+var cells=[];(function(){var g=$("grid");for(var i=0;i<9;i++){var d=document.createElement("div");d.className="cell";g.appendChild(d);cells.push(d);}})();
+var GRIDPOS=[0,1,2,3,5,6,7,8];  // 8 usable cells (skip center 4)
+var nb=null;
+function startN(){ startNAt(loadN()); }
+function loadN(){var s=loadStore();return s.n||2;}
+function saveN(n){var s=loadStore();s.n=n;saveStore(s);}
+
+// PURE: build a trial sequence with a target number of position/letter matches.
+function buildSeq(N,len){
+  var pos=[],let_=[],i;
+  for(i=0;i<len;i++){pos.push(GRIDPOS[ri(8)]);let_.push(LETTERS[ri(8)]);}
+  // force ~30% position matches and ~30% letter matches (independently), incl. some dual
+  var want=Math.max(2,Math.round((len-N)*0.3));
+  function plant(arr,pool){var placed=0,guard=0;
+    while(placed<want&&guard++<len*8){var k=N+ri(len-N);if(arr[k]!==arr[k-N]){arr[k]=arr[k-N];placed++;}}}
+  plant(pos,GRIDPOS);plant(let_,LETTERS);
+  var trials=[];for(i=0;i<len;i++)trials.push({pos:pos[i],let:let_[i],posM:i>=N&&pos[i]===pos[i-N],letM:i>=N&&let_[i]===let_[i-N]});
+  return trials;
+}
+// PURE: score responses -> per-modality hit/FA and a combined accuracy + next-N recommendation.
+function scoreN(trials,respPos,respLet,N){
+  var pH=0,pM=0,pFA=0,pCR=0,lH=0,lM=0,lFA=0,lCR=0,i;
+  for(i=N;i<trials.length;i++){
+    var rp=!!respPos[i],rl=!!respLet[i];
+    if(trials[i].posM){rp?pH++:pM++;}else{rp?pFA++:pCR++;}
+    if(trials[i].letM){rl?lH++:lM++;}else{rl?lFA++:lCR++;}
+  }
+  var pAcc=(pH+pCR)/Math.max(1,pH+pM+pFA+pCR),lAcc=(lH+lM+lFA+lCR?(lH+lCR)/(lH+lM+lFA+lCR):0);
+  var acc=(pAcc+lAcc)/2;
+  var next=N; if(acc>=0.8&&(pFA+lFA)<=2)next=N+1; else if(acc<0.5)next=Math.max(1,N-1);
+  return {posHit:pH,posMiss:pM,posFA:pFA,letHit:lH,letMiss:lM,letFA:lFA,pAcc:+pAcc.toFixed(3),lAcc:+lAcc.toFixed(3),accuracy:+acc.toFixed(3),nextN:next};
+}
+function startNAt(N){
+  if(nb&&nb.active)return;
+  var len=20+N;
+  nb={active:true,N:N,i:-1,trials:buildSeq(N,len),respPos:[],respLet:[],curPos:false,curLet:false,to:null};
+  $("nLevel").textContent=N;$("nbRes").textContent="";$("nbGo").disabled=true;$("nbGo").textContent="running…";
+  stepN();
+}
+function paint(idx){cells.forEach(function(c){c.className="cell";});if(idx!=null)cells[idx].className="cell on";}
+function stepN(){
+  // commit previous trial's response
+  if(nb.i>=0){nb.respPos[nb.i]=nb.curPos;nb.respLet[nb.i]=nb.curLet;}
+  nb.i++;
+  $("posBtn").className="";$("letBtn").className="";nb.curPos=false;nb.curLet=false;
+  if(nb.i>=nb.trials.length){return finishN();}
+  $("nbTrial").textContent=(nb.i+1)+"/"+nb.trials.length;
+  var tr=nb.trials[nb.i];
+  paint(tr.pos);$("letter").textContent=tr.let;
+  nb.tStart=performance.now();
+  nb.to=setTimeout(function(){paint(null);$("letter").textContent="";setTimeout(stepN,700);},2000); // 2s on, .7s ISI
+}
+function markPos(){if(!nb||!nb.active||nb.i<0)return;nb.curPos=true;$("posBtn").className="hit";}
+function markLet(){if(!nb||!nb.active||nb.i<0)return;nb.curLet=true;$("letBtn").className="hit";}
+function finishN(){
+  nb.active=false;$("nbGo").disabled=false;$("nbGo").textContent="▶ start block";paint(null);$("letter").textContent="";
+  var sc=scoreN(nb.trials,nb.respPos,nb.respLet,nb.N);
+  saveN(sc.nextN);$("nLevel").textContent=sc.nextN;
+  var rec={epoch:+(Date.now()/1000).toFixed(2),ts:new Date().toISOString(),kind:"nback",N:nb.N,nextN:sc.nextN,
+    accuracy:sc.accuracy,pos_acc:sc.pAcc,let_acc:sc.lAcc,pos_fa:sc.posFA,let_fa:sc.letFA,trials:nb.trials.length};
+  pushSession(rec);
+  $("nbRes").innerHTML="N="+nb.N+" · acc <b>"+(sc.accuracy*100).toFixed(0)+"%</b> (pos "+(sc.pAcc*100).toFixed(0)+"%, letter "+(sc.lAcc*100).toFixed(0)+"%) · FA "+(sc.posFA+sc.letFA)+" · next block <b class='ok'>N="+sc.nextN+"</b>";
+}
+$("nbGo").onclick=startN;
+$("posBtn").onclick=markPos;$("letBtn").onclick=markLet;
+document.addEventListener("keydown",function(e){var k=e.key.toLowerCase();if(k==="a")markPos();else if(k==="l")markLet();else if(k>="1"&&k<="4")trAnswer(+e.key-1);});
+
+/* ================= transfer probe: rule induction ================= */
+var tr=null;
+// PURE: generate one rule-induction item (arithmetic/geometric/alternating) + options.
+function genItem(){
+  var kind=ri(3),a,seq=[],rule,ans,i;
+  if(kind===0){var d=2+ri(6);a=1+ri(9);for(i=0;i<4;i++)seq.push(a+i*d);ans=a+4*d;rule="arithmetic +"+d;}
+  else if(kind===1){var r=2+ri(3);a=1+ri(4);for(i=0;i<4;i++)seq.push(a*Math.pow(r,i));ans=a*Math.pow(r,4);rule="geometric x"+r;}
+  else{var d1=1+ri(4),d2=2+ri(5);a=1+ri(6);var cur=a;seq.push(cur);for(i=1;i<4;i++){cur+= (i%2? d1:d2);seq.push(cur);}ans=cur+((4%2)?d1:d2);rule="alternating +"+d1+"/+"+d2;}
+  var opts=[ans];while(opts.length<4){var cand=ans+(ri(2)?1:-1)*(1+ri(Math.max(3,Math.abs(ans)>>1||3)));if(opts.indexOf(cand)<0&&cand!==ans)opts.push(cand);else if(opts.indexOf(cand)<0)opts.push(cand);}
+  // shuffle
+  for(i=opts.length-1;i>0;i--){var j=ri(i+1),t=opts[i];opts[i]=opts[j];opts[j]=t;}
+  return {seq:seq,ans:ans,opts:opts,rule:rule,correctIdx:opts.indexOf(ans)};
+}
+function startTr(){
+  if(tr&&tr.active)return;
+  tr={active:true,i:0,N:10,items:[],cur:null,tag:$("trTag").value,t0:null};
+  $("trRes").textContent="";$("trGo").disabled=true;$("trGo").textContent="running…";nextTr();
+}
+function nextTr(){
+  if(tr.i>=tr.N)return finishTr();
+  $("trItem").textContent=(tr.i+1)+"/"+tr.N;
+  var it=genItem();tr.cur=it;
+  $("trStim").textContent=it.seq.join("  ,  ")+"  ,  ?";
+  var wrap=$("trOpts");wrap.innerHTML="";
+  it.opts.forEach(function(o,idx){var b=document.createElement("button");b.textContent=o;b.onclick=function(){trAnswer(idx);};wrap.appendChild(b);});
+  tr.t0=performance.now();
+}
+function trAnswer(idx){
+  if(!tr||!tr.active||tr.t0==null)return;
+  var it=tr.cur,rt=performance.now()-tr.t0,correct=idx===it.correctIdx;
+  tr.items.push({correct:correct,rt:Math.round(rt),rule:it.rule});tr.t0=null;tr.i++;
+  $("trStim").textContent=correct?"✓":"✗ ("+it.ans+")";
+  setTimeout(nextTr,600);
+}
+function finishTr(){
+  tr.active=false;$("trGo").disabled=false;$("trGo").textContent="▶ 10-item probe";$("trOpts").innerHTML="";$("trStim").textContent="";
+  var acc=mean(tr.items.map(function(x){return x.correct?1:0;})),mrt=median(tr.items.filter(function(x){return x.correct;}).map(function(x){return x.rt;}));
+  var rec={epoch:+(Date.now()/1000).toFixed(2),ts:new Date().toISOString(),kind:"transfer",tag:tr.tag,n:tr.items.length,
+    accuracy:+acc.toFixed(3),median_rt_ms:mrt!=null?Math.round(mrt):null};
+  pushSession(rec);
+  $("trRes").innerHTML="<b>"+tr.tag+"</b> · accuracy <b>"+(acc*100).toFixed(0)+"%</b> · median RT "+(mrt!=null?Math.round(mrt):"—")+"ms <span class='muted'>— compare baseline vs post vs retention</span>";
+}
+$("trGo").onclick=startTr;
+
+/* ================= history / spacing view ================= */
+function renderHistory(){
+  var s=loadStore(),ses=s.sessions||[];
+  var nbk=ses.filter(function(x){return x.kind==="nback";}),trk=ses.filter(function(x){return x.kind==="transfer";});
+  var days={};ses.forEach(function(x){days[(x.ts||"").slice(0,10)]=1;});
+  var tByTag={};trk.forEach(function(x){(tByTag[x.tag]=tByTag[x.tag]||[]).push(x.accuracy);});
+  var html="<div class='row'><span class='chip'>training blocks <b>"+nbk.length+"</b></span><span class='chip'>days practiced <b>"+Object.keys(days).length+"</b></span><span class='chip'>current N <b>"+(s.n||2)+"</b></span></div>";
+  if(nbk.length){var maxN=Math.max.apply(null,nbk.map(function(x){return x.N;}));html+="<div class='sub' style='margin-top:6px;'>peak N reached: <b>"+maxN+"</b></div>";}
+  var tags=["baseline","post","retention"];
+  html+="<table style='margin-top:8px;'><tr><th>transfer probe</th><th>attempts</th><th>mean accuracy</th></tr>";
+  tags.forEach(function(tg){var a=tByTag[tg];html+="<tr><td>"+tg+"</td><td>"+(a?a.length:0)+"</td><td>"+(a?Math.round(mean(a)*100)+"%":"—")+"</td></tr>";});
+  html+="</table>";
+  // the honest verdict on persistence
+  if(tByTag.baseline&&tByTag.post){
+    var d=mean(tByTag.post)-mean(tByTag.baseline);
+    html+="<div class='sub' style='margin-top:8px;'>post − baseline: <b class='"+(d>0.1?"ok":"bad")+"'>"+(d>=0?"+":"")+(d*100).toFixed(0)+"%</b> — but this could be practice. ";
+    if(tByTag.retention){var dr=mean(tByTag.retention)-mean(tByTag.baseline);
+      html+="retention − baseline: <b class='"+(dr>0.1?"ok":"bad")+"'>"+(dr>=0?"+":"")+(dr*100).toFixed(0)+"%</b> — <b>this</b> is the durable-transfer number.";}
+    else html+="Take a <b>retention</b> probe after a multi-day break to test persistence.";
+    html+="</div>";
+  }
+  $("history").innerHTML=html;
+}
+
+/* ================= downloads ================= */
+$("dl").onclick=function(){
+  var s=loadStore();
+  var rec={schema:"g-lab/1",type:"persist_experiment",ts:new Date().toISOString(),privacy:"local_only_no_upload",current_n:s.n||2,sessions:s.sessions||[]};
+  var blob=new Blob([JSON.stringify(rec,null,2)],{type:"application/json"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="persist_"+rec.ts.replace(/[:.]/g,"-")+".json";a.click();
+};
+$("prereg").onclick=function(){
+  var txt=["g-lab durable-transfer pre-registration (n=1)","",
+    "HYPOTHESIS: adaptive dual n-back training produces a gain on an untrained",
+    "rule-induction transfer probe that SURVIVES a multi-day break (durable far transfer).","",
+    "PRIMARY OUTCOME: transfer-probe accuracy, retention vs baseline.",
+    "  (post vs baseline is secondary — it cannot separate transfer from practice.)","",
+    "DESIGN:","  - Baseline: 3 transfer probes (tag=baseline), median = baseline score.",
+    "  - Training: >=10 adaptive dual n-back blocks, ~1/day (distributed practice).",
+    "  - Post: 3 transfer probes (tag=post) within a day of last training.",
+    "  - Break: >=5 days, no training.",
+    "  - Retention: 3 transfer probes (tag=retention).","",
+    "DECISION RULE (set BEFORE data): declare durable transfer only if",
+    "  median(retention) - median(baseline) >= 0.15 accuracy AND CI excludes 0.",
+    "  Otherwise: no durable far-transfer effect (the expected result per the literature).","",
+    "CONFOUNDS TO LOG EACH SESSION: sleep, caffeine, time of day, mood.",
+    "STOP CONDITION: fixed at 10 training days decided in advance (no peeking-and-extending).","",
+    "PRIOR: meta-analyses predict NO durable far transfer. A null result is the",
+    "likely, publishable, honest outcome. This design exists to avoid fooling yourself."
+  ].join("\n");
+  var blob=new Blob([txt],{type:"text/plain"});var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="preregistration.txt";a.click();
+};
+renderHistory();
+})();
+</script>
+</body>
+</html>
