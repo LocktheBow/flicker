@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>g-lab · focus trainer (adaptive self-suggestion + Stroop)</title>
+<style>
+  :root{color-scheme:dark;}*{box-sizing:border-box;}
+  body{margin:0;background:#0d1117;color:#e6e6e6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;padding:14px;max-width:720px;margin:0 auto;}
+  h1{font-size:16px;margin:0 0 2px;} h2{font-size:13px;margin:16px 0 6px;color:#8b949e;font-weight:600;}
+  .sub{color:#8b949e;font-size:12px;line-height:1.5;margin:0 0 6px;}
+  .card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px 14px;margin:8px 0;}
+  button{font-size:13px;font-weight:600;border:none;border-radius:8px;padding:8px 13px;cursor:pointer;color:#fff;background:#21262d;}
+  button.go{background:#2ea043;} button.stop{background:#da3633;} button.blue{background:#1f6feb;}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .chip{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:5px 9px;font-size:12px;}
+  .chip b{color:#58a6ff;}
+  #cue{font-size:20px;line-height:1.4;min-height:56px;display:flex;align-items:center;justify-content:center;text-align:center;color:#d2a8ff;padding:8px;}
+  #band{height:12px;border-radius:6px;background:linear-gradient(90deg,#1f6feb 0%,#238636 40%,#238636 60%,#da3633 100%);position:relative;margin:6px 0;}
+  #needle{position:absolute;top:-3px;width:3px;height:18px;background:#fff;border-radius:2px;transition:left .3s;}
+  .ok{color:#3fb950;} .bad{color:#f0c674;} .muted{color:#8b949e;}
+  #stim{font-size:64px;font-weight:800;text-align:center;height:110px;display:flex;align-items:center;justify-content:center;letter-spacing:2px;}
+  #swatches{display:flex;gap:10px;justify-content:center;}
+  .sw{width:64px;height:44px;border-radius:8px;border:2px solid #30363d;cursor:pointer;display:flex;align-items:flex-end;justify-content:center;font-size:10px;color:#000a;padding-bottom:2px;}
+  .likert{display:flex;gap:5px;} .likert button{padding:5px 9px;background:#0d1117;border:1px solid #30363d;}
+  .likert button.sel{background:#1f6feb;border-color:#1f6feb;}
+  label.q{display:block;margin:7px 0 3px;font-size:12px;}
+  a{color:#58a6ff;}
+  .warn{background:#2d2308;border:1px solid #9e6a03;border-radius:8px;padding:8px 11px;font-size:12px;margin:8px 0;}
+</style>
+</head>
+<body>
+<h1>focus trainer <span class="muted" style="font-size:12px;">· adaptive self-suggestion + Stroop</span></h1>
+<p class="sub">Runs alongside the <a href="index.html">flicker</a>. Reads your state (HR + aim, same feeds) and delivers brief self-suggestion cues to hold you in the <b>optimal arousal band</b> (performance peaks at moderate arousal — the Yerkes-Dodson curve). The Stroop block measures cognitive control between matches.</p>
+<div class="warn">Honest framing: this is <b>self-suggestion + arousal regulation</b>, not clinical hypnosis and not an IQ raiser. Any gain is most likely a <b>state/expectancy</b> effect on this specific task — which is real and worth measuring, but is not a durable change in fluid intelligence. Don't run the suggestion audio while driving or anything that needs full attention; gaming is fine.</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">live state → suggestion</h2>
+  <div class="row">
+    <button id="run" class="go">▶ start cues</button>
+    <label class="chip"><input type="checkbox" id="tts" checked> speak aloud</label>
+    <span class="chip">source <b id="src">—</b></span>
+    <span class="chip">arousal <b id="ar">—</b></span>
+    <span class="chip">target <b>45–65%</b></span>
+  </div>
+  <div id="band"><div id="needle" style="left:50%;"></div></div>
+  <div id="cue" class="muted">idle — press start</div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Stroop block <span class="muted">— name the INK color, ignore the word</span></h2>
+  <div class="row"><button id="stroopGo" class="blue">▶ run 24-trial block</button>
+    <span class="chip">trial <b id="tn">0/0</b></span>
+    <span class="chip" id="phaseTag">pre</span>
+    <select id="phase" class="chip" style="color:#e6e6e6;"><option value="pre">pre-session</option><option value="post">post-session</option><option value="between">between-match</option></select>
+  </div>
+  <div id="stim"></div>
+  <div id="swatches"></div>
+  <div id="stroopRes" class="sub" style="margin-top:8px;"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">suggestibility self-check <span class="muted">— rough absorption proxy, once</span></h2>
+  <p class="sub">Higher absorption ~ more likely to respond to suggestion (the effects in the literature concentrate in high-suggestibility people). This is a self-report proxy, <b>not</b> a validated scale.</p>
+  <div id="quiz"></div>
+  <div class="row" style="margin-top:8px;"><button id="quizSave">save</button><span class="chip" id="suggScore">—</span></div>
+</div>
+
+<div class="row"><button id="dl">⭳ download session results</button> <a href="index.html" class="chip" style="text-decoration:none;">← flicker</a></div>
+<p class="sub" id="hint">Everything runs locally in this tab — nothing is uploaded.</p>
+
+<script>
+(function(){
+"use strict";
+var $=function(id){return document.getElementById(id);};
+var qp=new URLSearchParams(location.search);
+function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+function mean(a){var m=0,i;for(i=0;i<a.length;i++)m+=a[i];return a.length?m/a.length:0;}
+function median(a){if(!a.length)return null;var s=a.slice().sort(function(x,y){return x-y;}),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2;}
+var log=[];   // event log, epoch-stamped, for the downloadable record
+
+/* ---------- state read (HR + aim, same localhost feeds as the flicker) ---------- */
+var HRURL=qp.get("hr")||"http://127.0.0.1:8787/hr",AIMURL=qp.get("aim")||"http://127.0.0.1:8788/aim";
+var arousal=null,src="—",stPoll=null;
+function pollState(){
+  var got={hr:null,aim:null};
+  var done=function(){
+    var parts=[],labs=[];
+    if(got.hr!=null){parts.push([got.hr,0.6]);labs.push("hr");}
+    if(got.aim!=null){parts.push([got.aim,0.4]);labs.push("aim");}
+    if(parts.length){var v=0,w=0;parts.forEach(function(p){v+=p[0]*p[1];w+=p[1];});arousal=v/w;src=labs.join("+");}
+    else{arousal=null;src="none";}
+    $("src").textContent=src;$("ar").textContent=arousal!=null?Math.round(arousal*100)+"%":"—";
+    if(arousal!=null)$("needle").style.left=clamp(arousal,0,1)*100+"%";
+  };
+  fetch(HRURL,{cache:"no-store"}).then(function(r){return r.json();}).then(function(j){if((+j.quality||0)>0.4&&j.arousal!=null)got.hr=+j.arousal;}).catch(function(){}).finally(function(){
+    fetch(AIMURL,{cache:"no-store"}).then(function(r){return r.json();}).then(function(j){if((+j.quality||0)>0.3&&j.arousal!=null)got.aim=+j.arousal;}).catch(function(){}).finally(done);
+  });
+}
+
+/* ---------- adaptive self-suggestion engine ----------
+   arousal over the band -> DOWN-regulate (calm); under -> UP-regulate (activate);
+   in band -> AFFIRM. Fires on a gentle cadence, skips mid-fight (high aim activity
+   is inferred from arousal spikes) so it stays minimally intrusive. */
+var BANK={
+  down:["Breathe out slow. Hands steady.","Shoulders drop. Calm and precise.","Slow is smooth, smooth is fast.","Let it settle. You have time."],
+  up:["Sit tall, sharpen up.","Lean in. Quick and alert.","Eyes active. Wake it up.","Pick up the pace."],
+  affirm:["In the zone. Reads come easy.","Clear mind. Patterns pop.","Locked in. Trust your training.","Smooth focus. You see it early."]
+};
+var LO=0.45,HI=0.65,running=false,cueTimer=null,lastCue=0,cueIdx={down:0,up:0,affirm:0};
+function speak(t){if(!$("tts").checked||!window.speechSynthesis)return;try{var u=new SpeechSynthesisUtterance(t);u.rate=0.9;u.pitch=0.95;u.volume=0.9;speechSynthesis.cancel();speechSynthesis.speak(u);}catch(e){}}
+function deliver(){
+  var dir=arousal==null?"affirm":(arousal>HI?"down":(arousal<LO?"up":"affirm"));
+  var bank=BANK[dir],t=bank[cueIdx[dir]%bank.length];cueIdx[dir]++;
+  $("cue").textContent=t;$("cue").className="";speak(t);
+  log.push({epoch:+(Date.now()/1000).toFixed(2),kind:"cue",dir:dir,arousal:arousal!=null?+arousal.toFixed(3):null,src:src,text:t});
+}
+function tick(){
+  var now=Date.now()/1000;
+  // hold off if very over-aroused *and* a cue fired recently (don't nag mid-fight); otherwise ~every 55s
+  var gap=(arousal!=null&&arousal>0.85)?90:55;
+  if(now-lastCue>=gap){lastCue=now;deliver();}
+}
+$("run").onclick=function(){
+  running=!running;
+  if(running){this.textContent="■ stop cues";this.className="stop";stPoll=setInterval(pollState,1000);pollState();
+    lastCue=0;cueTimer=setInterval(tick,1000);setTimeout(deliver,600);}
+  else{this.textContent="▶ start cues";this.className="go";clearInterval(stPoll);clearInterval(cueTimer);if(window.speechSynthesis)speechSynthesis.cancel();$("cue").textContent="stopped";$("cue").className="muted";}
+};
+
+/* ---------- Stroop block (cognitive-control measure; Raz's paradigm) ---------- */
+var COLORS=[{n:"RED",hex:"#e5484d"},{n:"GREEN",hex:"#3fb950"},{n:"BLUE",hex:"#4c8dff"},{n:"YELLOW",hex:"#f0c674"}];
+var sw=$("swatches");
+COLORS.forEach(function(c,i){var d=document.createElement("div");d.className="sw";d.style.background=c.hex;d.dataset.i=i;d.textContent=(i+1);sw.appendChild(d);});
+var block=null;
+function newTrial(){
+  var wi=Math.floor(Math.random()*4),ii=Math.floor(Math.random()*4);
+  // ~50% congruent
+  if(Math.random()<0.5)ii=wi;
+  return {word:COLORS[wi].n,ink:ii,congruent:wi===ii};
+}
+function startBlock(){
+  if(block&&block.active)return;
+  block={active:true,i:0,N:24,trials:[],t0:null,cur:null,phase:$("phase").value};
+  $("stroopRes").textContent="";$("stroopGo").textContent="running…";
+  next();
+}
+function next(){
+  if(block.i>=block.N){return finishBlock();}
+  $("tn").textContent=(block.i+1)+"/"+block.N;
+  $("stim").textContent="+";$("stim").style.color="#8b949e";
+  setTimeout(function(){
+    var tr=newTrial();block.cur=tr;
+    $("stim").textContent=tr.word;$("stim").style.color=COLORS[tr.ink].hex;
+    block.t0=performance.now();
+    block.to=setTimeout(function(){   // no response in 3s -> miss, advance (don't hang the block)
+      if(block.t0==null)return;
+      block.trials.push({congruent:tr.congruent,rt:null,correct:false,timeout:true});
+      block.t0=null;block.i++;$("stim").textContent="—";$("stim").style.color="#8b949e";setTimeout(next,220);
+    },3000);
+  },350+Math.random()*250);
+}
+function respond(inkGuess){
+  if(!block||!block.active||block.t0==null)return;
+  if(block.to){clearTimeout(block.to);block.to=null;}
+  var rt=performance.now()-block.t0,tr=block.cur,correct=inkGuess===tr.ink;
+  block.trials.push({congruent:tr.congruent,rt:Math.round(rt),correct:correct});
+  block.t0=null;block.i++;
+  $("stim").textContent=correct?"✓":"✗";$("stim").style.color=correct?"#3fb950":"#da3633";
+  setTimeout(next,250);
+}
+function finishBlock(){
+  block.active=false;$("stroopGo").textContent="▶ run 24-trial block";$("stim").textContent="";
+  var C=block.trials.filter(function(t){return t.congruent&&t.correct;}).map(function(t){return t.rt;});
+  var I=block.trials.filter(function(t){return !t.congruent&&t.correct;}).map(function(t){return t.rt;});
+  var acc=mean(block.trials.map(function(t){return t.correct?1:0;}));
+  var mc=median(C),mi=median(I),interf=(mc!=null&&mi!=null)?Math.round(mi-mc):null;
+  var res={epoch:+(Date.now()/1000).toFixed(2),kind:"stroop",phase:block.phase,n:block.trials.length,
+    accuracy:+acc.toFixed(3),median_congruent_ms:mc!=null?Math.round(mc):null,median_incongruent_ms:mi!=null?Math.round(mi):null,
+    interference_ms:interf};
+  log.push(res);
+  $("stroopRes").innerHTML="<b>"+block.phase+"</b> · acc <b>"+(acc*100).toFixed(0)+"%</b> · congruent <b>"+(mc!=null?Math.round(mc):"—")+"ms</b> · incongruent <b>"+(mi!=null?Math.round(mi):"—")+"ms</b> · <b class='bad'>interference "+(interf!=null?interf+"ms":"—")+"</b> <span class='muted'>(lower = better control; compare pre vs post)</span>";
+}
+$("stroopGo").onclick=startBlock;
+sw.addEventListener("click",function(e){var d=e.target.closest(".sw");if(d)respond(+d.dataset.i);});
+document.addEventListener("keydown",function(e){if(e.key>="1"&&e.key<="4")respond(+e.key-1);});
+
+/* ---------- suggestibility self-check (absorption proxy) ---------- */
+var QS=["I can picture scenes so vividly they feel real.",
+  "I lose track of time, fully absorbed in games / music / films.",
+  "I can make part of my body feel warm or heavy just by imagining it.",
+  "Daydreams can feel almost as real as things happening around me.",
+  "I find it easy to follow along with guided imagery."];
+var ans={};
+var quiz=$("quiz");
+QS.forEach(function(q,qi){
+  var l=document.createElement("label");l.className="q";l.textContent=(qi+1)+". "+q;quiz.appendChild(l);
+  var row=document.createElement("div");row.className="likert";
+  for(var v=1;v<=5;v++){(function(v){var b=document.createElement("button");b.textContent=v;
+    b.onclick=function(){ans[qi]=v;Array.prototype.forEach.call(row.children,function(c){c.className="";});b.className="sel";};
+    row.appendChild(b);})(v);}
+  quiz.appendChild(row);
+});
+(function(){var p=null;try{p=JSON.parse(localStorage.getItem("glab_sugg"));}catch(e){}if(p&&p.score!=null)$("suggScore").innerHTML="saved: <b>"+Math.round(p.score*100)+"%</b>";})();
+$("quizSave").onclick=function(){
+  var keys=Object.keys(ans);if(keys.length<QS.length){$("suggScore").textContent="answer all 5 first";return;}
+  var s=keys.reduce(function(a,k){return a+ans[k];},0)/(QS.length*5);
+  try{localStorage.setItem("glab_sugg",JSON.stringify({score:+s.toFixed(3),ts:new Date().toISOString()}));}catch(e){}
+  $("suggScore").innerHTML="score <b>"+Math.round(s*100)+"%</b> "+(s>=0.7?"(high — suggestion effects more likely)":s>=0.45?"(moderate)":"(low — suggestion effects less likely for you)");
+  log.push({epoch:+(Date.now()/1000).toFixed(2),kind:"suggestibility",score:+s.toFixed(3)});
+};
+
+/* ---------- download ---------- */
+$("dl").onclick=function(){
+  var sugg=null;try{sugg=JSON.parse(localStorage.getItem("glab_sugg"));}catch(e){}
+  var rec={schema:"g-lab/1",type:"focus_train",ts:new Date().toISOString(),
+    privacy:"local_only_no_upload",suggestibility:sugg,
+    stroop:log.filter(function(e){return e.kind==="stroop";}),
+    cues:log.filter(function(e){return e.kind==="cue";}),
+    events:log};
+  var blob=new Blob([JSON.stringify(rec,null,2)],{type:"application/json"});
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="focus_train_"+rec.ts.replace(/[:.]/g,"-")+".json";a.click();
+};
+})();
+</script>
+</body>
+</html>
