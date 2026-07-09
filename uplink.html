@@ -269,11 +269,28 @@ setInterval(pollFeeds, 1000);
    on-demand re-centering that sports hypnosis actually trains. Keep volume low — you
    still need to hear footsteps. A near-silent keepalive tone stops the browser from
    throttling the cue timer while the game holds focus. */
-const live = { on:false, ctx:null, bed:null, keep:null, timer:null, lastCue:0, lastReanchor:0, cueGap:75 };
+const live = { on:false, ctx:null, bed:null, keep:null, timer:null, lastCue:0, lastReanchor:0, cueGap:70 };
+/* cue banks — phrasing adapted from the Jed McKenna corpus: lucidity WITHIN the
+   dreamstate (not sleep), Maya, "nothing is random — only fully perceived or not",
+   Brahman/dreamer/arbiter, "not two". Lucid = wide awake in the dream = flow/peak play. */
 const CUES = {
-  affirm:['You see it early. Trust the read.','Clear mind. Patterns pop.','Smooth and certain — you have time.','Locked in. One beat ahead.'],
-  activate:['Sharpen up. Lean in.','Eyes active. Pick up the pace.','Wake it up. Hunt.'],
-  calm:['Breathe out. Settle. Next play.','Hands quiet. Let it go. Reset.','Shoulders drop. Slow is smooth.']
+  affirm:[ // in the lucid band: you are the dreamer, authoring the read
+    'You are the dreamer. This is your dreamstate. You author every read.',
+    'Nothing here is random — only fully perceived, or not. You perceive fully.',
+    'See through the fake. Maya is thin. You are not fooled.',
+    'No separation between you and the play. Not two.',
+    'The whole fight resolves into clarity.'
+  ],
+  calm:[ // arousal spiking: stay lucid, don\'t let the dream rattle the dreamer
+    'You are still the dreamer. The tilt is Maya. Let it thin.',
+    'Breathe out. The dream cannot rattle the dreamer.',
+    'Nothing you lost was real. Author the next moment.'
+  ],
+  activate:[ // gone sub-lucid / checked out: wake up inside the dream
+    'Wake up inside the dream. Come lucid. Eyes wide.',
+    'You went sub-lucid. Rise. You are the arbiter here.',
+    'Sharpen. The dreamer is paying full attention now.'
+  ]
 };
 const anchorWord = ()=> (S.cfg.anchor||'anchor').split('→')[0].trim();
 function speakLive(t){
@@ -286,28 +303,34 @@ function pick(bank){ return bank[Math.floor(performance.now()/1000)%bank.length]
 function ensureCtx(){ try{ live.ctx=live.ctx||new(window.AudioContext||window.webkitAudioContext)(); if(live.ctx.resume)live.ctx.resume();
   if(!live.keep){ const o=live.ctx.createOscillator(),g=live.ctx.createGain(); g.gain.value=0.0002; o.frequency.value=20; o.connect(g); g.connect(live.ctx.destination); o.start(); live.keep={o,g}; } }catch(e){} }
 function bedOn(){ ensureCtx(); try{ const c=live.ctx; const osc=c.createOscillator(),lfo=c.createOscillator(),lg=c.createGain(),g=c.createGain();
-  osc.frequency.value=110; lfo.frequency.value=0.1; lg.gain.value=0.5; g.gain.value=0; lfo.connect(lg); lg.connect(g.gain); osc.connect(g); g.connect(c.destination); osc.start(); lfo.start();
-  g.gain.setTargetAtTime(0.035,c.currentTime,1.5); live.bed={osc,lfo,g}; }catch(e){} }
+  // 40 Hz amplitude-modulated carrier — the auditory twin of the 40 Hz flicker (ASSR).
+  osc.frequency.value=90; lfo.frequency.value=40; lg.gain.value=0.5; g.gain.value=0; lfo.connect(lg); lg.connect(g.gain); osc.connect(g); g.connect(c.destination); osc.start(); lfo.start();
+  g.gain.setTargetAtTime(0.03,c.currentTime,1.5); live.bed={osc,lfo,g}; }catch(e){} }
 function bedOff(){ if(live.bed){ try{ live.bed.g.gain.setTargetAtTime(0,live.ctx.currentTime,0.4); const b=live.bed; setTimeout(()=>{try{b.osc.stop();b.lfo.stop();}catch(e){}},600); }catch(e){} live.bed=null; } }
 function liveTick(){
   const now=performance.now()/1000, a=feeds.live?feeds.arousal:null;
-  if(a!=null && a>0.8 && now-live.lastReanchor>25){ live.lastReanchor=now; live.lastCue=now; speakLive(anchorWord()+'. '+pick(CUES.calm)); return; }
-  if(now-live.lastCue>=live.cueGap){ live.lastCue=now;
+  // auto re-anchor the instant the feed sees a tilt spike — no input needed
+  if(a!=null && a>0.8 && now-live.lastReanchor>25){ live.lastReanchor=now; live.lastCue=now; speakLive(anchorWord()+'. You are the dreamer. Come lucid. Next play.'); return; }
+  // MICROADJUST cadence: sparse while you hold the lucid band (0.4–0.65), denser the
+  // further you drift out of it — so the loop only leans in when lucidity is slipping.
+  let gap=live.cueGap;
+  if(a!=null){ const dist = a>0.65 ? a-0.65 : (a<0.4 ? 0.4-a : 0); gap = clamp(live.cueGap*(1-dist*2.4), 22, live.cueGap); }
+  if(now-live.lastCue>=gap){ live.lastCue=now;
     const bank = a==null?CUES.affirm : (a>0.65?CUES.calm : (a<0.4?CUES.activate:CUES.affirm));
     speakLive(pick(bank)); }
 }
 function startLive(){ live.on=true; live.lastCue=0; live.lastReanchor=0; ensureCtx();
   if(document.getElementById('bedTgl')&&document.getElementById('bedTgl').classList.contains('on')) bedOn();
-  speakLive(anchorWord()+'. You are in. '+pick(CUES.affirm));
+  speakLive(anchorWord()+'. The match is your dreamstate. Come lucid — you are the dreamer.');
   live.timer=setInterval(liveTick,1000); renderLive(); refreshTop(); }
 function stopLive(){ live.on=false; if(live.timer)clearInterval(live.timer); live.timer=null; bedOff(); if(window.speechSynthesis)speechSynthesis.cancel(); renderLive(); }
 
 function renderLive(){
   V.innerHTML = `
     <div class="panel">
-      <p class="eyebrow">In-match uplink</p>
-      <h2>${live.on?'◉ LIVE — companion running':'Access the state while you play'}</h2>
-      <p class="lede" style="margin-top:8px">Audio only — eyes stay on the game. Short waking cues on a timer, plus an <b>auto re-anchor</b> the instant the feed sees you spike. Nothing to click mid-match. Keep it quiet enough to still hear footsteps.</p>
+      <p class="eyebrow">Lucid loop · in-match</p>
+      <h2>${live.on?'◉ LOOP LIVE — holding you lucid':'Stay lucid in the dreamstate while you play'}</h2>
+      <p class="lede" style="margin-top:8px">The match is the dreamstate; the loop keeps you <b>lucid within it</b> — the dreamer authoring every read, seeing through Maya. Audio only, hands-free: cadence <b>microadjusts</b> to your live arousal (sparse in the lucid band, denser when you drift), and it <b>auto re-anchors</b> the instant the feed sees you spike. Language drawn from the Jed corpus. Keep it quiet enough to still hear footsteps.</p>
       <div class="statgrid" style="margin-top:12px">
         <div class="stat"><div class="k">LIVE INTAKE</div><div class="v" id="liveIntake">…</div></div>
         <div class="stat"><div class="k">STATE</div><div class="v ${live.on?'warm':''}" id="liveState">${live.on?'RECEIVING':'IDLE'}</div></div>
