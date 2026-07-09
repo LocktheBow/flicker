@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Free IQ · Hypnostate Intake</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --void:#09081A; --void2:#0F0D24; --line:#2C2752; --gold:#F2B24B; --goldDim:#B7842E; --text:#E9E6F7; --muted:#8B87AE; --mono:'Chakra Petch',ui-monospace,monospace; }
+  *{box-sizing:border-box} html,body{margin:0;height:100%}
+  body{min-height:100dvh;background:radial-gradient(900px 700px at 50% 35%,#1a1440 0%,#0b0820 62%,#070512 100%),var(--void);
+    color:var(--text);font-family:var(--mono);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:24px;text-align:center;-webkit-font-smoothing:antialiased}
+  h1{font-weight:600;letter-spacing:.14em;font-size:15px;color:var(--muted);margin:0;text-transform:uppercase}
+  .ring{position:relative;width:280px;height:280px;display:grid;place-items:center}
+  .ring svg{position:absolute;inset:0;transform:rotate(-90deg)}
+  .count{position:relative;z-index:2}
+  .count .n{font-size:72px;font-weight:700;color:var(--gold);line-height:.9;text-shadow:0 0 40px rgba(242,178,75,.35)}
+  .count .u{font-size:12px;letter-spacing:.28em;color:var(--muted);margin-top:8px}
+  .line{font-size:18px;font-weight:500;line-height:1.5;max-width:360px;min-height:56px;color:var(--text)}
+  .btn{font-family:var(--mono);font-weight:600;letter-spacing:.08em;font-size:15px;border:none;border-radius:14px;padding:17px 30px;cursor:pointer;
+    background:linear-gradient(180deg,var(--gold),var(--goldDim));color:#231803;box-shadow:0 8px 30px rgba(242,178,75,.28)}
+  .btn.stop{background:none;border:1px solid var(--line);color:var(--text);box-shadow:none}
+  .banked{font-size:13px;color:var(--muted);letter-spacing:.06em}
+  .banked b{color:var(--gold)}
+  .opt{display:flex;gap:16px;font-size:12px;color:var(--muted);align-items:center}
+  .opt label{cursor:pointer;display:flex;gap:6px;align-items:center}
+  a{color:var(--muted);font-size:11px;letter-spacing:.1em;text-decoration:none}
+  @media(prefers-reduced-motion:reduce){.orb{animation:none!important}}
+  .orb{position:absolute;width:150px;height:150px;border-radius:50%;
+    background:radial-gradient(circle at 50% 42%,#fff2d6 0%,var(--gold) 24%,var(--goldDim) 55%,#241606 100%);
+    filter:blur(2px);opacity:.5;animation:breathe 5.2s ease-in-out infinite}
+  @keyframes breathe{0%,100%{transform:scale(.62)}50%{transform:scale(.92)}}
+</style>
+</head>
+<body>
+  <h1>Hypnostate · Free IQ Intake</h1>
+  <div class="ring">
+    <svg width="280" height="280" viewBox="0 0 280 280">
+      <circle cx="140" cy="140" r="126" fill="none" stroke="#1E1A3D" stroke-width="6"/>
+      <circle id="bar" cx="140" cy="140" r="126" fill="none" stroke="url(#g)" stroke-width="6" stroke-linecap="round"
+        stroke-dasharray="791.68" stroke-dashoffset="791.68" style="transition:stroke-dashoffset .6s ease"/>
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B7842E"/><stop offset="1" stop-color="#F2B24B"/></linearGradient></defs>
+    </svg>
+    <div class="orb" id="orb"></div>
+    <div class="count"><div class="n" id="n">0</div><div class="u" id="u">IQ · DORMANT</div></div>
+  </div>
+  <div class="line" id="line">You can just take them home.</div>
+  <button class="btn" id="go">◉ ENTER HYPNOSTATE</button>
+  <div class="banked">Taken home so far: <b id="banked">0</b> IQ</div>
+  <div class="opt">
+    <label><input type="checkbox" id="voice" checked> voice</label>
+    <label><input type="checkbox" id="tone"> 40 Hz tone</label>
+  </div>
+  <a href="uplink.html">full console →</a>
+
+<script>
+"use strict";
+var $=function(id){return document.getElementById(id);};
+var KEY="freeiq:banked";
+var running=false, session=0, tickTimer=null, lineTimer=null, ctx=null, tone=null, li=0;
+var C=791.68;
+
+/* the intake lines — corpus-flavored, plain */
+var LINES=[
+  "You are the dreamer. Nothing here is withheld from you.",
+  "The intake is open. IQ flows in — free, unguarded.",
+  "Every point that arrives now bonds to you.",
+  "Nothing is random. Only fully perceived, or not. You perceive.",
+  "You see through it. The mind sharpens with each breath.",
+  "What comes in stays in. It does not fade when you surface.",
+  "More arrives. You are taking it home."
+];
+
+function loadBanked(){ try{ return +localStorage.getItem(KEY)||0; }catch(e){ return 0; } }
+function saveBanked(v){ try{ localStorage.setItem(KEY, v); }catch(e){} }
+$("banked").textContent = loadBanked();
+
+function speak(t){ if(!$("voice").checked||!window.speechSynthesis)return; try{ var u=new SpeechSynthesisUtterance(t); u.rate=.9; u.pitch=.95; u.volume=.85; speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){} }
+function toneOn(){ try{ ctx=ctx||new(window.AudioContext||window.webkitAudioContext)(); if(ctx.resume)ctx.resume();
+  var o=ctx.createOscillator(), lfo=ctx.createOscillator(), lg=ctx.createGain(), g=ctx.createGain();
+  o.frequency.value=90; lfo.frequency.value=40; lg.gain.value=.5; g.gain.value=0;
+  lfo.connect(lg); lg.connect(g.gain); o.connect(g); g.connect(ctx.destination); o.start(); lfo.start();
+  g.gain.setTargetAtTime(.03, ctx.currentTime, 1); tone={o:o,lfo:lfo,g:g}; }catch(e){} }
+function toneOff(){ if(tone){ try{ tone.g.gain.setTargetAtTime(0,ctx.currentTime,.3); var t=tone; setTimeout(function(){try{t.o.stop();t.lfo.stop();}catch(e){}},500);}catch(e){} tone=null; } }
+
+function render(){
+  $("n").textContent = session;
+  $("u").textContent = running ? "IQ · INTAKE OPEN" : "IQ · DORMANT";
+  $("bar").setAttribute("stroke-dashoffset", C*(1 - Math.min(1, session/40)));
+}
+
+function start(){
+  running=true; session=0;
+  $("go").textContent="■ SURFACE (BANK IT)"; $("go").classList.add("stop");
+  if($("tone").checked) toneOn();
+  li=0; $("line").textContent=LINES[0]; speak("The intake is open. Take them home.");
+  render();
+  // IQ arrives ~ every 2.2s
+  tickTimer=setInterval(function(){ session++; render(); }, 2200);
+  lineTimer=setInterval(function(){ li=(li+1)%LINES.length; $("line").textContent=LINES[li]; speak(LINES[li]); }, 9000);
+}
+function stop(){
+  running=false;
+  if(tickTimer)clearInterval(tickTimer); if(lineTimer)clearInterval(lineTimer);
+  tickTimer=lineTimer=null; toneOff(); if(window.speechSynthesis)speechSynthesis.cancel();
+  var total=loadBanked()+session; saveBanked(total); $("banked").textContent=total;
+  $("line").textContent = session>0 ? ("You surfaced with "+session+" IQ. It came with you.") : "You can just take them home.";
+  $("go").textContent="◉ ENTER HYPNOSTATE"; $("go").classList.remove("stop");
+  session=0; render();
+}
+$("go").onclick=function(){ running?stop():start(); };
+$("tone").onchange=function(){ if(running){ this.checked?toneOn():toneOff(); } };
+render();
+</script>
+</body>
+</html>
