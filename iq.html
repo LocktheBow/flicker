@@ -52,6 +52,7 @@
     <label><input type="checkbox" id="voice" checked> voice</label>
     <label><input type="checkbox" id="tone"> θ 6 Hz tone</label>
   </div>
+  <div class="opt" style="width:240px;max-width:80vw"><label style="width:100%;gap:10px">vol<input type="range" id="vol" min="0" max="100" value="35" style="flex:1;accent-color:var(--gold)"><span id="volv" style="width:26px;color:var(--gold)">35</span></label></div>
   <a href="uplink.html">full console →</a>
 
 <script>
@@ -76,14 +77,16 @@ function loadBanked(){ try{ return +localStorage.getItem(KEY)||0; }catch(e){ ret
 function saveBanked(v){ try{ localStorage.setItem(KEY, v); }catch(e){} }
 $("banked").textContent = loadBanked();
 
-function speak(t){ if(!$("voice").checked||!window.speechSynthesis)return; try{ var u=new SpeechSynthesisUtterance(t); u.rate=.9; u.pitch=.95; u.volume=.85; speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){} }
+function vol(){ return (+$("vol").value||0)/100; }
+function toneGain(){ return vol()*0.11; }   // tone stays subtle even at max
+function speak(t){ if(!$("voice").checked||!window.speechSynthesis)return; try{ var u=new SpeechSynthesisUtterance(t); u.rate=.9; u.pitch=.95; u.volume=Math.min(1,vol()*1.7); speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){} }
 /* theta (6 Hz) isochronic tone — the trance band in hypnosis EEG. 6 Hz is
    sub-audible, so we pulse an audible ~110 Hz carrier at 6 Hz to deliver it. */
 function toneOn(){ try{ ctx=ctx||new(window.AudioContext||window.webkitAudioContext)(); if(ctx.resume)ctx.resume();
   var o=ctx.createOscillator(), lfo=ctx.createOscillator(), lg=ctx.createGain(), g=ctx.createGain();
   o.frequency.value=110; lfo.frequency.value=6; lg.gain.value=.5; g.gain.value=0;
   lfo.connect(lg); lg.connect(g.gain); o.connect(g); g.connect(ctx.destination); o.start(); lfo.start();
-  g.gain.setTargetAtTime(.03, ctx.currentTime, 1); tone={o:o,lfo:lfo,g:g}; }catch(e){} }
+  g.gain.setTargetAtTime(toneGain(), ctx.currentTime, 1); tone={o:o,lfo:lfo,g:g}; }catch(e){} }
 function toneOff(){ if(tone){ try{ tone.g.gain.setTargetAtTime(0,ctx.currentTime,.3); var t=tone; setTimeout(function(){try{t.o.stop();t.lfo.stop();}catch(e){}},500);}catch(e){} tone=null; } }
 
 function render(){
@@ -113,6 +116,7 @@ function stop(){
 }
 $("go").onclick=function(){ running?stop():start(); };
 $("tone").onchange=function(){ if(running){ this.checked?toneOn():toneOff(); } };
+$("vol").oninput=function(){ $("volv").textContent=this.value; if(tone&&ctx) tone.g.gain.setTargetAtTime(toneGain(), ctx.currentTime, .1); };
 render();
 </script>
 </body>
